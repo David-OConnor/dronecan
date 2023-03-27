@@ -1,0 +1,18 @@
+[package]
+authors = ["David O'Connor <the_alchemist@fastmail.com>"]
+name = "dronecan"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+fdcan = "0.1.2"
+#fdcan = { version = "0.1.2", optional = true }
+# todo: Hardcoded for Can type.
+stm32-hal2 = { path = "../../stm32-hal" }
+
+[features]
+g4 = ["fdcan/fdcan_g0_g4_l5",  "stm32-hal2/g431", "stm32-hal2/can_fd_g"]
+h7 = ["fdcan/fdcan_h7", "stm32-hal2/h743v", "stm32-hal2/can_fd_h"]
+
