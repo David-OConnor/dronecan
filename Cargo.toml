@@ -8,7 +8,6 @@ edition = "2021"
 
 [dependencies]
 fdcan = "0.1.2"
-#fdcan = { version = "0.1.2", optional = true }
 # todo: Hardcoded for Can type.
 stm32-hal2 = { path = "../../stm32-hal", feature = "g431" }
 

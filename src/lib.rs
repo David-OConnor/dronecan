@@ -17,6 +17,7 @@ use fdcan::{
 };
 
 use stm32_hal2::can::Can;
+use stm32_hal2::dma::DmaInterrupt::TransferComplete;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -29,10 +30,6 @@ const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
 static FD_MODE: AtomicBool = AtomicBool::new(true);
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
-
-// Used to create a buffer with tail byte.
-// todo: How does DRONECAN handle this for FD? Open question. ie where the tail byte goes.
-const MAX_PAYLOAD_SIZE: usize = 23; // todo: T. RC channels of CRSF + 1 for trail byte.
 
 const CRC_POLY: u16 = 0x1021;
 const SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
@@ -141,10 +138,8 @@ struct Signature {
 impl Signature {
     pub fn new(extend_from: Option<u64>) -> Self {
         let crc = match extend_from {
-            Some(e) => {
-                (e & SIGNATURE_MASK64) ^ SIGNATURE_MASK64
-            }
-            None => SIGNATURE_MASK64
+            Some(e) => (e & SIGNATURE_MASK64) ^ SIGNATURE_MASK64,
+            None => SIGNATURE_MASK64,
         };
 
         Self { crc }
@@ -172,11 +167,11 @@ impl Signature {
 /// Determine the index for placing the tail byte of the payload. This procedure doesn't appear to
 /// be defined in the docs, but is defined in official software implementations.
 fn find_tail_byte_index(packet_len: u8) -> usize {
-    const DATA_LENGTHS: [u8; 8] = [8, 12,  16,  20, 24,  32,  48,  64];
+    const DATA_LENGTHS: [u8; 8] = [8, 12, 16, 20, 24, 32, 48, 64];
 
     for data_len in &DATA_LENGTHS {
-        if *packet_len <= data_len {
-            return len as usize - 1
+        if packet_len <= *data_len {
+            return *data_len as usize - 1;
         }
     }
     63
@@ -322,12 +317,18 @@ fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> u8 {
         // Cyphal note: Behavior of this bit is reversed from DroneCAN. Ie it's 1 for single-frame,
         // and first of multi-frame.
         | (toggle << 5)
-        | (transfer_id & 0b1_1111)
+        | ((transfer_id as u8) & 0b1_1111)
 }
 
 /// Handles splitting a payload into multiple frames, including DroneCAN and Cyphal requirements,
 /// eg CRC and data type signature.
-fn send_multiple_frames(payload: &[u8], payload_len: u16, can_id: u32)-> Result<(), CanError> {
+fn send_multiple_frames(
+    can: &mut Can_,
+    payload: &[u8],
+    payload_len: u16,
+    can_id: u32,
+    transfer_id: u8,
+) -> Result<(), CanError> {
     // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
     // "Multi-frame transfer" re requirements such as CRC and Toggle bit.
     let mut component = TransferComponent::MultiStart;
@@ -353,35 +354,40 @@ fn send_multiple_frames(payload: &[u8], payload_len: u16, can_id: u32)-> Result<
 
     let mut latest_i_sent = 6;
 
-    // todo: Fix and uncomment
-    while latest_i_sent < payload_len {
-        let tail_byte = make_tail_byte(component, transfer_id);
-
-        // todo: Tail byte only on last frame?
-        let mut payload_with_tail_byte = [0; MAX_PAYLOAD_SIZE];
-        payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-
-        // todo: For now, we append the tail byte after the payload data on FD. Is this right?
-        payload_with_tail_byte[payload_len as usize] = tail_byte;
-
-        can_send(can, can_id, &payload_with_tail_byte, MAX_PAYLOAD_SIZE as u8)?;
-
-        match component {
-            TransferComponent::MultiStart => {
-                component = TransferComponent::MultiMid(false);
-            }
-            TransferComponent::MultiMid(toggle_prev) => {
-                component = TransferComponent::MultiMid(toggle_prev);
-                // todo: End if at end.
-            }
-            TransferComponent::MultiEnd(_) => break,
-            TransferComponent::SingleFrame => panic!("Single frame transfer; code logic error"),
-        }
-
-        latest_i_sent += 7; // 8 byte frame size, - 1 for each frame's tail byte.
-
-    }
-    return Ok(())
+    // while latest_i_sent < payload_len {
+    //     let mut payload_to_send = if FD_MODE.load(Ordering::Acquire) {
+    //         &[0; DATA_FRAME_MAX_LEN_FD as usize][..]
+    //     } else {
+    //         &[0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
+    //     };
+    //
+    //     let payload_to_send = if let TransferComponent::MultiEnd(_) = component {
+    //         let tail_byte = make_tail_byte(component, transfer_id);
+    //         payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+    //         payload_with_tail_byte[payload_len as usize] = tail_byte;
+    //
+    //         payload_with_tail_byte
+    //     } else {
+    //         payload
+    //     };
+    //
+    //     can_send(can, can_id, payload_to_send, MAX_PAYLOAD_SIZE as u8)?;
+    //
+    //     match component {
+    //         TransferComponent::MultiStart => {
+    //             component = TransferComponent::MultiMid(false);
+    //         }
+    //         TransferComponent::MultiMid(toggle_prev) => {
+    //             component = TransferComponent::MultiMid(toggle_prev);
+    //             // todo: End if at end.
+    //         }
+    //         TransferComponent::MultiEnd(_) => break,
+    //         TransferComponent::SingleFrame => panic!("Single frame transfer; code logic error"),
+    //     }
+    //
+    //     latest_i_sent += 7; // 8 byte frame size, - 1 for each frame's tail byte.
+    // }
+    return Ok(());
 }
 
 /// Send a DroneCAN "broadcast" message. See [The DroneCAN spec, transport layer page](https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/)
@@ -395,25 +401,33 @@ pub fn broadcast(
 ) -> Result<(), CanError> {
     let can_id = make_can_id(priority, message_type_id, SOURCE_NODE_ID);
 
-    let max_frame_size = if FD_MODE.load(Ordering::Acquire) {
-        DATA_FRAME_MAX_LEN_FD - 1
+    // We subtract 1 to accomodate the tail byte.
+    let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
+        DATA_FRAME_MAX_LEN_FD
     } else {
-        DATA_FRAME_MAX_LEN_LEGACY - 1
+        DATA_FRAME_MAX_LEN_LEGACY
     };
     // The transfer payload is up to 7 bytes for non-FD DRONECAN.
     // If data is longer than a single frame, set up a multi-frame transfer.
-    // todo: QC this multi-frame logic
-    if payload_len > max_frame_size as u16 {
-        return send_multiple_frames(payload, payload_len, can_id);
+    // We subtract one to accomodate the tail byte.
+    if payload_len > (frame_payload_len - 1) as u16 {
+        return send_multiple_frames(can, payload, payload_len, can_id, transfer_id);
     }
 
     let tail_byte = make_tail_byte(TransferComponent::SingleFrame, transfer_id);
+    let tail_byte_i = find_tail_byte_index(payload_len as u8);
 
-    let mut payload_with_tail_byte = [0; MAX_PAYLOAD_SIZE];
+    let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
+
+    // todo: Not sure how to make this work
+    // let payload_with_tail_byte = if FD_MODE.load(Ordering::Acquire) {
+    //     &mut [0; DATA_FRAME_MAX_LEN_FD as usize][..]
+    // } else {
+    //     &mut [0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
+    // };
+
     payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+    payload_with_tail_byte[tail_byte_i] = tail_byte;
 
-    // todo: For now, we append the tail byte after the payload data on FD. Is this right?
-    payload_with_tail_byte[find_tail_byte_index(payload_len as u8)] = tail_byte;
-
-    can_send(can, can_id, &payload_with_tail_byte, MAX_PAYLOAD_SIZE as u8)
+    can_send(can, can_id, &payload_with_tail_byte[0..tail_byte_i + 1], tail_byte_i as u8 + 1)
 }
