@@ -8,26 +8,31 @@
 
 #![no_std]
 
-use core::sync::atomic::{AtomicBool, Ordering};
-
-use fdcan::{
-    frame::{FrameFormat, TxFrameHeader},
-    id::{ExtendedId, Id},
-    FdCan, NormalOperationMode,
+use core::{
+    sync::atomic::{AtomicBool, Ordering},
+    convert::Infallible,
 };
 
-use stm32_hal2::can::Can;
-use stm32_hal2::dma::DmaInterrupt::TransferComplete;
+use fdcan::{
+    frame::{FrameFormat, TxFrameHeader, RxFrameInfo},
+    id::{ExtendedId, Id},
+    FdCan, NormalOperationMode,
+    ReceiveOverrun,
+};
+
+use stm32_hal2::{
+    can::Can,
+    dma::DmaInterrupt::TransferComplete,
+};
+
+use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
 type Can_ = FdCan<Can, NormalOperationMode>;
-
-// Node ID must be between 1 and 127 (?)
-const SOURCE_NODE_ID: u8 = 69;
 
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
 
-static FD_MODE: AtomicBool = AtomicBool::new(true);
+// static FD_MODE: AtomicBool = AtomicBool::new(true);
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 
@@ -75,8 +80,6 @@ pub enum TransferComponent {
     MultiEnd(bool),
 }
 
-#[derive(Clone, Copy)]
-#[repr(u8)]
 /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
 /// Valid values for priority range from 0 to 31, inclusively, where 0 corresponds to highest priority
 /// (and 31 corresponds to lowest priority).
@@ -88,6 +91,8 @@ pub enum TransferComponent {
 /// In multi-frame transfers, the value of the priority field shall be identical for all frames of the transfer.
 ///
 /// We use the Cyphal specification, due to its specificity.
+#[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
+#[repr(u8)]
 pub enum MsgPriority {
     Exceptional = 0,
     Immediate = 1,
@@ -183,8 +188,10 @@ fn can_send(
     can_id: u32,
     frame_data: &[u8],
     frame_data_len: u8,
+    fd_mode: bool,
 ) -> Result<(), CanError> {
-    let max_frame_len = if FD_MODE.load(Ordering::Acquire) {
+    // let max_frame_len = if FD_MODE.load(Ordering::Acquire) {
+    let max_frame_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
         DATA_FRAME_MAX_LEN_LEGACY
@@ -196,7 +203,8 @@ fn can_send(
 
     const CAN_EFF_FLAG: u32 = 0; // todo: What is this? from DroneCAN simple example.
 
-    let frame_format = if FD_MODE.load(Ordering::Acquire) {
+    // let frame_format = if FD_MODE.load(Ordering::Acquire) {
+    let frame_format = if fd_mode {
         FrameFormat::Fdcan
     } else {
         FrameFormat::Standard
@@ -212,9 +220,10 @@ fn can_send(
         marker: None,
     };
 
-    let _tx_result = can.transmit(frame_header, frame_data).unwrap();
-
-    Ok(())
+    match can.transmit(frame_header, frame_data) {
+        Ok(_) => Ok(()),
+        Err(e) => Err(CanError{}),
+    }
 }
 
 /// Construct a CAN ID. See DroneCAN Spec, CAN bus transport layer doc, "ID field" section.
@@ -269,6 +278,22 @@ fn make_can_id(
     result
 }
 
+/// Pull priority, type id, and source node id from the CAN id.
+/// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
+/// todo: Currently hard-coded for DroneCAN.
+pub fn parse_can_id(can_id: u32) -> (MsgPriority, u16, u8) {
+    let source_node_id = can_id as u8 & 0b111_1111;
+
+    let type_id = (can_id >> 8) as u16;
+
+    let msg_priority = match MsgPriority::try_from((can_id >> 24) as u8 & 0b1_1111) {
+        Ok(p) => p,
+        Err(e) => MsgPriority::Slow,
+    };
+
+    (msg_priority, type_id, source_node_id)
+}
+
 /// Construct a tail byte. See DroneCAN Spec, CAN bus transport layer.
 /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
 /// "The Data field of the CAN frame is shared between the following fields:
@@ -318,6 +343,19 @@ fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> u8 {
         // and first of multi-frame.
         | (toggle << 5)
         | ((transfer_id as u8) & 0b1_1111)
+}
+
+/// Pull start_of_transfer, end_of_transfer, and toggle flags from the tail byte. We don't
+/// convert to TransferComponent due to ambiguities in Single vs multi-mid.
+/// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
+/// todo: Currently hard-coded for DroneCAN.
+pub fn parse_tail_byte(tail_byte: u8) -> (bool, bool, bool, u8) {
+    let transfer_id = tail_byte & 0b1_1111;
+    let toggle = (tail_byte >> 5) & 1;
+    let end = (tail_byte >> 6) & 1;
+    let start = (tail_byte >> 7) & 1;
+
+    (start != 0, end != 0, toggle != 0, transfer_id)
 }
 
 /// Handles splitting a payload into multiple frames, including DroneCAN and Cyphal requirements,
@@ -395,14 +433,17 @@ pub fn broadcast(
     can: &mut Can_,
     priority: MsgPriority,
     message_type_id: u16,
+    source_node_id: u8,
     transfer_id: u8,
     payload: &[u8],
     payload_len: u16,
+    fd_mode: bool,
 ) -> Result<(), CanError> {
-    let can_id = make_can_id(priority, message_type_id, SOURCE_NODE_ID);
+    let can_id = make_can_id(priority, message_type_id, source_node_id);
 
     // We subtract 1 to accomodate the tail byte.
-    let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
+    // let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
+    let frame_payload_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
         DATA_FRAME_MAX_LEN_LEGACY
@@ -419,15 +460,39 @@ pub fn broadcast(
 
     let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
 
-    // todo: Not sure how to make this work
-    // let payload_with_tail_byte = if FD_MODE.load(Ordering::Acquire) {
-    //     &mut [0; DATA_FRAME_MAX_LEN_FD as usize][..]
-    // } else {
-    //     &mut [0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
-    // };
+    // todo: Not sure how to make this work without this DRY.
+    // if FD_MODE.load(Ordering::Acquire) {
+    if fd_mode {
+        let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_FD as usize];
 
-    payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-    payload_with_tail_byte[tail_byte_i] = tail_byte;
+        payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+        payload_with_tail_byte[tail_byte_i] = tail_byte;
 
-    can_send(can, can_id, &payload_with_tail_byte[0..tail_byte_i + 1], tail_byte_i as u8 + 1)
+        can_send(can, can_id, &payload_with_tail_byte[0..tail_byte_i + 1], tail_byte_i as u8 + 1, fd_mode)
+    } else {
+        let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
+        payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+        payload_with_tail_byte[tail_byte_i] = tail_byte;
+
+        can_send(can, can_id, &payload_with_tail_byte[0..tail_byte_i + 1], tail_byte_i as u8 + 1, fd_mode)
+    }
+}
+
+/// FUnction to help parse the nested result from CAN rx results
+pub fn get_frame_info(rx_result: Result<ReceiveOverrun<RxFrameInfo>, nb::Error<Infallible>>) -> Result<RxFrameInfo, CanError>  {
+    // todo: This masks overruns currently.
+
+    match rx_result {
+        Ok(r) => {
+            match r {
+                ReceiveOverrun::NoOverrun(frame_info) => {
+                    Ok(frame_info)
+                }
+                ReceiveOverrun::Overrun(frame_info) => {
+                   Ok(frame_info)
+                }
+            }
+        }
+        Err(_) => Err(CanError {})
+    }
 }
