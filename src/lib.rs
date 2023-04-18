@@ -49,7 +49,7 @@ pub struct CanError {}
 pub struct ConfigCommon {
     /// Used to distinguish between multiple instances of this device. Stored in
     /// flash. Must be configured without any other instances of this device connected to the bus.
-    pub address: u8,
+    pub node_id: u8,
     /// Ie, capable of 64-byte frame lens, vice 8.
     pub fd_mode: bool,
     /// Kbps
@@ -59,7 +59,7 @@ pub struct ConfigCommon {
 impl Default for ConfigCommon {
     fn default() -> Self {
         Self {
-            address: 0,
+            node_id: 0,
             fd_mode: false,
             can_bitrate: 1_000,
         }
@@ -69,7 +69,7 @@ impl Default for ConfigCommon {
 impl ConfigCommon {
     pub fn from_bytes(buf: &[u8]) -> Self {
         Self {
-            address: buf[0],
+            node_id: buf[0],
             fd_mode: buf[1] != 0,
             can_bitrate: u16::from_le_bytes(buf[2..4].try_into().unwrap()),
         }
@@ -78,7 +78,7 @@ impl ConfigCommon {
     pub fn to_bytes(&self) -> [u8; CONFIG_COMMON_SIZE] {
         let mut result = [0; CONFIG_COMMON_SIZE];
 
-        result[0] = self.address;
+        result[0] = self.node_id;
         result[1] = self.fd_mode as u8;
         result[2..4].clone_from_slice(&self.can_bitrate.to_le_bytes());
 
