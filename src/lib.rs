@@ -27,6 +27,8 @@ use stm32_hal2::{
 
 use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
+pub mod messages;
+
 type Can_ = FdCan<Can, NormalOperationMode>;
 
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
@@ -40,9 +42,15 @@ const CRC_POLY: u16 = 0x1021;
 const SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
 const SIGNATURE_MASK64: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
+
 pub const CONFIG_COMMON_SIZE: usize = 4;
 
-pub struct CanError {}
+#[derive(Clone, Copy)]
+pub enum CanError {
+    CanHardware,
+    PayloadSize,
+    FrameSize,
+}
 
 /// This includes configuration data that we use on all nodes, and is not part of the official
 /// DroneCAN spec.
@@ -91,27 +99,6 @@ impl ConfigCommon {
 pub enum Protocol {
     DroneCan,
     Cyphal,
-}
-
-/// todo: QC spec.
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NodeHealth {
-    Ok = 0,
-    Warning = 1,
-    Error = 2,
-    Critical = 3,
-}
-
-/// todo: QC spec.
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NodeMode {
-    Operational = 0,
-    Initialization = 1,
-    Maintenance = 2,
-    SoftwareUpdate = 3,
-    Offline = 7,
 }
 
 #[derive(Clone, Copy)]
@@ -242,7 +229,7 @@ fn can_send(
     };
 
     if frame_data_len > max_frame_len {
-        return Err(CanError {});
+        return Err(CanError::FrameSize);
     }
 
     const CAN_EFF_FLAG: u32 = 0; // todo: What is this? from DroneCAN simple example.
@@ -473,6 +460,7 @@ fn send_multiple_frames(
 }
 
 /// Send a DroneCAN "broadcast" message. See [The DroneCAN spec, transport layer page](https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/)
+/// Should be broadcast at interval between 2 and 1000ms.
 pub fn broadcast(
     can: &mut Can_,
     priority: MsgPriority,
@@ -522,7 +510,7 @@ pub fn broadcast(
     }
 }
 
-/// FUnction to help parse the nested result from CAN rx results
+/// Function to help parse the nested result from CAN rx results
 pub fn get_frame_info(rx_result: Result<ReceiveOverrun<RxFrameInfo>, nb::Error<Infallible>>) -> Result<RxFrameInfo, CanError>  {
     // todo: This masks overruns currently.
 
