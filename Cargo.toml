@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 fdcan = "0.1.2"
 # todo: Hardcoded for Can type.
+cortex_m = "^0.7.7"
 stm32-hal2 = { path = "../../stm32-hal", feature = "g431" }
 
 # To parse enums from their integer repr
