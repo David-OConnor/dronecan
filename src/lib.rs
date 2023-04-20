@@ -25,6 +25,8 @@ use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
 
 pub mod messages;
 
+pub use messages::{*};
+
 type Can_ = FdCan<Can, NormalOperationMode>;
 
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
@@ -172,7 +174,7 @@ impl TransferCrc {
 /// - Message type ID: Data type ID of the encoded message (16 bits)
 /// - Service not message: Always 0. 1 bit.
 /// - Source nod ID.Can be 1-27. 7 bits.
-struct CanId {
+pub struct CanId {
     // Valid values for priority range from 0 to 31, inclusively, where 0 corresponds to highest
     // priority (and 31 corresponds to lowest priority).
     // In multi-frame transfers, the value of the priority field must be identical for all frames of the transfer.
@@ -190,13 +192,15 @@ struct CanId {
 impl CanId {
     pub fn value(&self) -> u32 {
         let on_cyphal = USING_CYPHAL.load(Ordering::Acquire);
+
+        let mut message_type_id = self.message_type_id;
         // Cyphal restricts message id to 13 bits.
         let (priority_bits, priority_shift) = if on_cyphal {
             message_type_id = message_type_id & 0b1_1111_1111_1111;
 
-            (priority as u32 & 0b111, 26)
+            (self.priority as u32 & 0b111, 26)
         } else {
-            (priority as u32 & 0b1_1111, 24)
+            (self.priority as u32 & 0b1_1111, 24)
         };
 
         // todo: for cyphal, bit 25 is 1 if a service transfer.
@@ -204,8 +208,8 @@ impl CanId {
         // The `&` operations are to enforce the smaller-bit-count allowed than the `u8` datatype allows.
 
         let mut result = (priority_bits << priority_shift)
-            | ((message_type_id as u32) << 8)
-            | ((source_node_id & 0b111_1111) as u32);
+            | ((self.message_type_id as u32) << 8)
+            | ((self.source_node_id & 0b111_1111) as u32);
 
         // On cyphal, Bits 21 and 22 are 1 when transmitting.
         if on_cyphal {
@@ -218,10 +222,10 @@ impl CanId {
     /// Pull priority, type id, and source node id from the CAN id.
     /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
     /// todo: Currently hard-coded for DroneCAN.
-    pub fn from_val(val: u32) -> Self {
+    pub fn from_value(val: u32) -> Self {
         let source_node_id = val as u8 & 0b111_1111;
 
-        let type_id = (val >> 8) as u16;
+        let message_type_id = (val >> 8) as u16;
 
         let priority = match MsgPriority::try_from((val >> 24) as u8 & 0b1_1111) {
             Ok(p) => p,
@@ -230,13 +234,13 @@ impl CanId {
 
         Self {
             priority,
-            type_id,
+            message_type_id,
             source_node_id,
         }
     }
 }
 
-struct TailByte {
+pub struct TailByte {
     pub start_of_transfer: bool,
     pub end_of_transfer: bool,
     pub toggle: bool,
@@ -249,35 +253,35 @@ impl TailByte {
         // For single-frame transfers, the value of this field is always 1.
         // For multi-frame transfers, the value of this field is 1 if the current frame is the first
         // frame of the transfer, and 0 otherwise.
-        ((start_of_transfer as u8) << 7)
+        ((self.start_of_transfer as u8) << 7)
             // For single-frame transfers, the value of this field is always 1.
             // For multi-frame transfers, the value of this field is 1 if the current frame is the last
             // frame of the transfer, and 0 otherwise.
-            | ((end_of_transfer as u8) << 6)
+            | ((self.end_of_transfer as u8) << 6)
             // For single-frame transfers, the value of this field is always 0.
             // For multi-frame transfers, this field contains the value of the toggle bit. As specified
             // above this will alternate value between frames, starting at 0 for the first frame.
             // Cyphal note: Behavior of this bit is reversed from DroneCAN. Ie it's 1 for single-frame,
             // and first of multi-frame.
-            | ((toggle as u8) << 5)
-            | (transfer_id & 0b1_1111)
+            | ((self.toggle as u8) << 5)
+            | (self.transfer_id & 0b1_1111)
     }
 
     /// Pull start_of_transfer, end_of_transfer, and toggle flags from the tail byte. We don't
     /// convert to TransferComponent due to ambiguities in Single vs multi-mid.
     /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
     /// todo: Currently hard-coded for DroneCAN.
-    pub fn from_val(val: u8) -> Self {
-        let transfer_id = tail_byte & 0b1_1111;
-        let toggle = (tail_byte >> 5) & 1;
-        let end = (tail_byte >> 6) & 1;
-        let start = (tail_byte >> 7) & 1;
+    pub fn from_value(val: u8) -> Self {
+        let transfer_id = val & 0b1_1111;
+        let toggle = (val >> 5) & 1;
+        let end = (val >> 6) & 1;
+        let start = (val >> 7) & 1;
 
         Self {
-            transfer_idm
+            transfer_id,
             toggle: toggle != 0,
-            end: toggle != 0,
-            start: start != 0,
+            end_of_transfer: toggle != 0,
+            start_of_transfer: start != 0,
         }
     }
 }
@@ -370,7 +374,7 @@ fn can_send(
 
     match can.transmit(frame_header, frame_data) {
         Ok(_) => Ok(()),
-        Err(e) => Err(CanError {}),
+        Err(e) => Err(CanError::CanHardware),
     }
 }
 
@@ -384,22 +388,22 @@ fn can_send(
 /// Cyphal works in a similar way, but with ar reversed toggle bit.
 fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> TailByte {
     // Defaults for a single-frame transfer using the DroneCAN spec..
-    let mut start_of_transfer = 1;
-    let mut end_of_transfer = 1;
-    let mut toggle = 0;
+    let mut start_of_transfer = true;
+    let mut end_of_transfer = true;
+    let mut toggle = false;
 
     match transfer_comonent {
         TransferComponent::MultiStart => {
-            end_of_transfer = 0;
+            end_of_transfer = false;
         }
         TransferComponent::MultiMid(toggle_prev) => {
-            start_of_transfer = 0;
-            end_of_transfer = 0;
-            toggle = !(toggle_prev as u8);
+            start_of_transfer = false;
+            end_of_transfer = false;
+            toggle = ! toggle_prev;
         }
         TransferComponent::MultiEnd(toggle_prev) => {
-            start_of_transfer = 0;
-            toggle = !(toggle_prev as u8);
+            start_of_transfer = false;
+            toggle = !toggle_prev;
         }
         _ => (),
     }
@@ -499,7 +503,11 @@ pub fn broadcast(
     payload_len: u16,
     fd_mode: bool,
 ) -> Result<(), CanError> {
-    let can_id = make_can_id(priority, message_type_id, source_node_id);
+    let can_id = CanId {
+        priority, 
+        message_type_id, 
+        source_node_id,
+    };
 
     // We subtract 1 to accomodate the tail byte.
     // let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
@@ -512,7 +520,7 @@ pub fn broadcast(
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
     if payload_len > (frame_payload_len - 1) as u16 {
-        return send_multiple_frames(can, payload, payload_len, can_id, transfer_id);
+        return send_multiple_frames(can, payload, payload_len, can_id.value(), transfer_id);
     }
 
     let tail_byte = make_tail_byte(TransferComponent::SingleFrame, transfer_id);
@@ -526,11 +534,11 @@ pub fn broadcast(
         let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_FD as usize];
 
         payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-        payload_with_tail_byte[tail_byte_i] = tail_byte;
+        payload_with_tail_byte[tail_byte_i] = tail_byte.value();
 
         can_send(
             can,
-            can_id,
+            can_id.value(),
             &payload_with_tail_byte[0..tail_byte_i + 1],
             tail_byte_i as u8 + 1,
             fd_mode,
@@ -538,11 +546,11 @@ pub fn broadcast(
     } else {
         let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
         payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-        payload_with_tail_byte[tail_byte_i] = tail_byte;
+        payload_with_tail_byte[tail_byte_i] = tail_byte.value();
 
         can_send(
             can,
-            can_id,
+            can_id.value(),
             &payload_with_tail_byte[0..tail_byte_i + 1],
             tail_byte_i as u8 + 1,
             fd_mode,
@@ -561,18 +569,18 @@ pub fn get_frame_info(
             ReceiveOverrun::NoOverrun(frame_info) => Ok(frame_info),
             ReceiveOverrun::Overrun(frame_info) => Ok(frame_info),
         },
-        Err(_) => Err(CanError {}),
+        Err(_) => Err(CanError::CanHardware),
     }
 }
 
-pub fn get_tail_byte(payload: &[u8], frame_len: u16) -> Result<TailByte, CanError> {
-    let i = find_tail_byte_index(frame_len as u8);
+pub fn get_tail_byte(payload: &[u8], frame_len: u8) -> Result<TailByte, CanError> {
+    let i = find_tail_byte_index(frame_len);
 
     if i > payload.len() {
         return Err(CanError::PayloadSize);
     }
 
-    Ok(TailByte::from_val(payload[i])
+    Ok(TailByte::from_value(payload[i]))
 }
 
 // todo: You need a fn to get a payload from multiple frames
