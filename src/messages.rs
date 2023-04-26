@@ -6,6 +6,8 @@ use core::sync::atomic::{AtomicUsize, Ordering};
 
 use crate::{Can, CanError, MsgPriority, broadcast};
 
+use half::f16;
+
 use cortex_m;
 
 pub const DATA_TYPE_ID_GET_NODE_INFO: u16 = 1;
@@ -15,12 +17,22 @@ pub const DATA_TYPE_ID_TRANSPORT_STATS: u16 = 4; // todo?
 pub const DATA_TYPE_ID_PANIC: u16 = 5; // todo?
 pub const DATA_TYPE_ID_RESTART: u16 = 5; // todo?
 
+pub const DATA_TYPE_ID_RAW_AIR_DATA: u16 = 1027;
+pub const DATA_TYPE_ID_STATIC_PRESSURE: u16 = 1028;
+pub const DATA_TYPE_ID_STATIC_TEMPERATURE: u16 = 1029;
+pub const DATA_TYPE_ID_FIX2: u16 = 1_063;
+
 pub static TRANSFER_ID_NODE_INFO: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_STATUS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_TIME_SYNC: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_TRANSPORT_STATS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_PANIC: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_RESTART: AtomicUsize = AtomicUsize::new(0);
+
+pub static TRANSFER_ID_AIR_DATA: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_STATIC_PRESSURE: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
@@ -365,4 +377,66 @@ pub fn handle_time_sync(
     // todo: Handle.
 
     Ok(())
+}
+
+// todo: Publish air data
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/air_data/1028.StaticPressure.uavcan
+pub fn publish_static_pressure(
+    can: &mut crate::Can_,
+    pressure: f32, // Pascal
+    pressure_variance: f32, // Pascal^2. 16-bit
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let mut payload = [0; 6];
+
+    payload[0..4].clone_from_slice(&pressure.to_le_bytes());
+
+    let pressure_variance = f16::from_f32(pressure_variance);
+    payload[4..6].clone_from_slice(&pressure_variance.to_le_bytes());
+
+    let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        MsgPriority::Slow,
+        DATA_TYPE_ID_PANIC,
+        node_id,
+        transfer_id as u8,
+        &payload,
+        payload.len() as u16,
+        fd_mode,
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/air_data/1029.StaticTemperature.uavcan
+pub fn publish_temperature(
+    can: &mut crate::Can_,
+    temperature: f32, // Kelvin. 16-bit.
+    temperature_variance: f32, // Kelvin^2. 16-bit
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let mut payload = [0; 4];
+
+    // todo: Wrong. Figure out how to convert to f16.
+    let temperature = f16::from_f32(temperature);
+    payload[0..2].clone_from_slice(&temperature.to_le_bytes());
+
+    let temperature_variance = f16::from_f32(temperature_variance);
+    payload[2..4].clone_from_slice(&temperature_variance.to_le_bytes());
+
+    let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        MsgPriority::Nominal,
+        DATA_TYPE_ID_PANIC,
+        node_id,
+        transfer_id as u8,
+        &payload,
+        payload.len() as u16,
+        fd_mode,
+    )
 }

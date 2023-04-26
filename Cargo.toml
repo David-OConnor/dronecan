@@ -15,6 +15,9 @@ stm32-hal2 = { path = "../../stm32-hal", feature = "g431" }
 # To parse enums from their integer repr
 num_enum = { version = "^0.6.0", default_features = false }
 
+# 16-bit floating point.
+half = { version = "^2.2.1", default_features = false }
+
 nb = "^1.1.0"  # For use with Fdcan lib's infallible type.
 
 [features]
