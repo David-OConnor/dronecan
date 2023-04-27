@@ -34,6 +34,11 @@ pub static TRANSFER_ID_STATIC_PRESSURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 
+// Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
+pub const DATA_TYPE_ID_ACK: u16 = 2_000;
+
+pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
+
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
 #[repr(u8)]

@@ -18,6 +18,9 @@ num_enum = { version = "^0.6.0", default_features = false }
 # 16-bit floating point.
 half = { version = "^2.2.1", default_features = false }
 
+# For the tightly-packed and many-fielded Fix2.
+packed_struct = {version = "^0.10.1", default_features = false }
+
 nb = "^1.1.0"  # For use with Fdcan lib's infallible type.
 
 [features]

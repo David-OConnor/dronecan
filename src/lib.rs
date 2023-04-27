@@ -21,9 +21,8 @@ use fdcan::{
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
 
-use num_enum::{TryFromPrimitive, TryFromPrimitiveError};
-
 pub mod messages;
+pub mod gnss;
 
 pub use messages::{*};
 
@@ -120,17 +119,46 @@ pub enum TransferComponent {
 /// In multi-frame transfers, the value of the priority field shall be identical for all frames of the transfer.
 ///
 /// We use the Cyphal specification, due to its specificity.
-#[derive(Clone, Copy, Eq, PartialEq, TryFromPrimitive)]
-#[repr(u8)]
+#[derive(Clone, Copy)]
 pub enum MsgPriority {
-    Exceptional = 0,
-    Immediate = 1,
-    Fast = 2,
-    High = 3,
-    Nominal = 4,
-    Low = 5,
-    Slow = 6,
-    Optional = 7,
+    Exceptional,
+    Immediate,
+    Fast,
+    High,
+    Nominal,
+    Low,
+    Slow,
+    Optional,
+    Other(u8),
+}
+
+impl MsgPriority {
+    pub fn val(&self) -> u8 {
+        match self {
+            Self::Exceptional => 0,
+            Self::Immediate => 1,
+            Self::Fast => 2,
+            Self::High => 3,
+            Self::Nominal => 4,
+            Self::Low => 5,
+            Self::Slow => 6,
+            Self::Optional => 7,
+            Self::Other(val) => *val,
+        }
+    }
+
+    pub fn from_val(val: u8) -> Self {
+        match val {
+            0 => Self::Exceptional,
+            1 => Self::Immediate,
+            2 => Self::Fast,
+            3 => Self::High,
+            4 => Self::Nominal,
+            5 => Self::Low,
+            6 => Self::Slow,
+            _ => Self::Other(val)
+        }
+    }
 }
 
 /// Code for computing CRC for multi-frame transfers:
@@ -187,6 +215,7 @@ pub struct CanId {
     // Note that Node ID is represented by a 7-bit unsigned integer value and that zero is reserved,
     // to represent either an unknown node or all nodes, depending on the context.
     pub source_node_id: u8,
+    pub service: bool,
 }
 
 impl CanId {
@@ -198,9 +227,9 @@ impl CanId {
         let (priority_bits, priority_shift) = if on_cyphal {
             message_type_id = message_type_id & 0b1_1111_1111_1111;
 
-            (self.priority as u32 & 0b111, 26)
+            (self.priority.val() as u32 & 0b111, 26)
         } else {
-            (self.priority as u32 & 0b1_1111, 24)
+            (self.priority.val() as u32 & 0b1_1111, 24)
         };
 
         // todo: for cyphal, bit 25 is 1 if a service transfer.
@@ -209,6 +238,7 @@ impl CanId {
 
         let mut result = (priority_bits << priority_shift)
             | ((self.message_type_id as u32) << 8)
+            | ((self.service as u32) << 7)
             | ((self.source_node_id & 0b111_1111) as u32);
 
         // On cyphal, Bits 21 and 22 are 1 when transmitting.
@@ -227,15 +257,13 @@ impl CanId {
 
         let message_type_id = (val >> 8) as u16;
 
-        let priority = match MsgPriority::try_from((val >> 24) as u8 & 0b1_1111) {
-            Ok(p) => p,
-            Err(e) => MsgPriority::Slow,
-        };
+        let priority = MsgPriority::from_val((val >> 24) as u8 & 0b1_1111);
 
         Self {
             priority,
             message_type_id,
             source_node_id,
+            service: false, // todo - hard-coded
         }
     }
 }
@@ -342,7 +370,6 @@ fn can_send(
     frame_data_len: u8,
     fd_mode: bool,
 ) -> Result<(), CanError> {
-    // let max_frame_len = if FD_MODE.load(Ordering::Acquire) {
     let max_frame_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
@@ -353,16 +380,13 @@ fn can_send(
         return Err(CanError::FrameSize);
     }
 
-    const CAN_EFF_FLAG: u32 = 0; // todo: What is this? from DroneCAN simple example.
-
-    // let frame_format = if FD_MODE.load(Ordering::Acquire) {
     let frame_format = if fd_mode {
         FrameFormat::Fdcan
     } else {
         FrameFormat::Standard
     };
 
-    let id = Id::Extended(ExtendedId::new(can_id | CAN_EFF_FLAG).unwrap());
+    let id = Id::Extended(ExtendedId::new(can_id).unwrap());
 
     let frame_header = TxFrameHeader {
         len: frame_data_len,
@@ -507,6 +531,7 @@ pub fn broadcast(
         priority, 
         message_type_id, 
         source_node_id,
+        service: false, // todo: Customizable.
     };
 
     // We subtract 1 to accomodate the tail byte.
@@ -516,6 +541,7 @@ pub fn broadcast(
     } else {
         DATA_FRAME_MAX_LEN_LEGACY
     };
+
     // The transfer payload is up to 7 bytes for non-FD DRONECAN.
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
