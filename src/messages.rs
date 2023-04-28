@@ -2,7 +2,7 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use crate::{Can, CanError, MsgPriority, broadcast};
 
@@ -34,10 +34,18 @@ pub static TRANSFER_ID_STATIC_PRESSURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 
+pub const BUF_SIZE_NODE_STATUS: usize = 7;
+
+static mut BUF_NODE_STATUS: [u8; BUF_SIZE_NODE_STATUS] = [0; BUF_SIZE_NODE_STATUS];
+
 // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
 pub const DATA_TYPE_ID_ACK: u16 = 2_000;
 
 pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
+
+// Static buffers, to ensure they live long enough through transmission. Note; This all include room for a tail byte.
+static mut PAYLOAD_NODE_INFO: [u8; 50] = [0; 50];
+static mut PAYLOAD_TRANSPORT_STATS: [u8; 19] = [0; 19];
 
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
@@ -69,8 +77,8 @@ pub struct NodeStatus {
 }
 
 impl NodeStatus {
-    pub fn to_bytes(&self) -> [u8; 7] {
-        let mut result = [0; 7];
+    pub fn to_bytes(&self) -> [u8; BUF_SIZE_NODE_STATUS] {
+        let mut result = [0; BUF_SIZE_NODE_STATUS];
 
         result[0..4].clone_from_slice(&self.uptime_sec.to_le_bytes());
 
@@ -173,9 +181,18 @@ pub fn publish_node_status(
         vendor_specific_status_code,
     };
 
-    let payload = status.to_bytes();
+    // todo: Determine if you need static bufs.
+    let mut payload = status.to_bytes();
+    // unsafe {
+    //     BUF_NODE_STATUS = status.to_bytes();
+    // }
 
     let transfer_id = TRANSFER_ID_NODE_STATUS.fetch_add(1, Ordering::Relaxed);
+
+    // todo: Temp/TS
+    // atomic::compiler_fence(Ordering::SeqCst);
+
+    let payload_len = payload.len() as u16;
 
     broadcast(
         can,
@@ -183,8 +200,10 @@ pub fn publish_node_status(
         DATA_TYPE_ID_NODE_STATUS,
         node_id,
         transfer_id as u8,
-        &payload,
-        payload.len() as u16,
+        &mut payload,
+        // unsafe { &mut BUF_NODE_STATUS },
+        payload_len,
+        // BUF_SIZE_NODE_STATUS as u16,
         fd_mode,
     )
 }
@@ -204,7 +223,7 @@ pub fn publish_node_info(
     node_id: u8,
 ) -> Result<(), CanError> {
     // todo: We have temporarily hardcoded this buffer fo a name len of 8.
-    let mut payload = [0; 49];
+    // let mut payload = [0; 49];
 
     let status = NodeStatus {
         uptime_sec,
@@ -213,10 +232,12 @@ pub fn publish_node_info(
         vendor_specific_status_code,
     };
 
-    payload[0..7].clone_from_slice(&status.to_bytes());
-    payload[7..22].clone_from_slice(&software_version.to_bytes());
-    payload[22..41].clone_from_slice(&hardware_version.to_bytes());
-    payload[41..node_name.len()].clone_from_slice(node_name);
+    unsafe {
+        PAYLOAD_NODE_INFO[0..7].clone_from_slice(&status.to_bytes());
+        PAYLOAD_NODE_INFO[7..22].clone_from_slice(&software_version.to_bytes());
+        PAYLOAD_NODE_INFO[22..41].clone_from_slice(&hardware_version.to_bytes());
+        PAYLOAD_NODE_INFO[41..node_name.len()].clone_from_slice(node_name);
+    }
 
     let payload_len = 41 + node_name.len() as u16;
 
@@ -228,7 +249,8 @@ pub fn publish_node_info(
         DATA_TYPE_ID_GET_NODE_INFO,
         node_id,
         transfer_id as u8,
-        &payload,
+        // &mut payload,
+        unsafe { &mut  PAYLOAD_NODE_INFO },
         payload_len,
         fd_mode,
     )
@@ -245,11 +267,13 @@ pub fn publish_transport_stats(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut payload = [0_u8; 18];
+    // let mut payload = [0_u8; 18];
 
-    payload[0..6].clone_from_slice(&num_transmitted.to_le_bytes()[0..6]);
-    payload[6..12].clone_from_slice(&num_received.to_le_bytes()[0..6]);
-    payload[12..18].clone_from_slice(&num_errors.to_le_bytes()[0..6]);
+    unsafe {
+        PAYLOAD_TRANSPORT_STATS[0..6].clone_from_slice(&num_transmitted.to_le_bytes()[0..6]);
+        PAYLOAD_TRANSPORT_STATS[6..12].clone_from_slice(&num_received.to_le_bytes()[0..6]);
+        PAYLOAD_TRANSPORT_STATS[12..18].clone_from_slice(&num_errors.to_le_bytes()[0..6]);
+    }
 
     let transfer_id = TRANSFER_ID_TRANSPORT_STATS.fetch_add(1, Ordering::Relaxed);
 
@@ -259,8 +283,8 @@ pub fn publish_transport_stats(
         DATA_TYPE_ID_TRANSPORT_STATS,
         node_id,
         transfer_id as u8,
-        &payload,
-        payload.len() as u16,
+        unsafe {&mut PAYLOAD_TRANSPORT_STATS },
+        18,
         fd_mode,
     )
 }
@@ -272,7 +296,7 @@ pub fn publish_transport_stats(
 /// undertaking any emergency actions." (Min messages: 3. Max interval: 500ms)
 pub fn publish_panic(
     can: &mut crate::Can_,
-    reason_text: &[u8],
+    reason_text: &mut [u8],
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
@@ -314,7 +338,7 @@ pub fn handle_restart_request(
             DATA_TYPE_ID_RESTART,
             node_id,
             transfer_id as u8,
-            &[0],
+            &mut [0],
             1,
             fd_mode,
         )?;
@@ -328,7 +352,7 @@ pub fn handle_restart_request(
         DATA_TYPE_ID_RESTART,
         node_id,
         transfer_id as u8,
-        &[1], // ie true; success
+        &mut [1], // ie true; success
         1,
         fd_mode,
     )?;
@@ -354,14 +378,16 @@ pub fn publish_time_sync(
 
     let transfer_id = TRANSFER_ID_GLOBAL_TIME_SYNC.fetch_add(1, Ordering::Relaxed);
 
+    let len = payload.len() as u16;
+
     broadcast(
         can,
         MsgPriority::Low,
         DATA_TYPE_ID_GLOBAL_TIME_SYNC,
         node_id,
         transfer_id as u8,
-        &payload,
-        payload.len() as u16,
+        &mut payload,
+        len,
         fd_mode,
     )?;
 
@@ -403,14 +429,16 @@ pub fn publish_static_pressure(
 
     let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
 
+    let len = payload.len() as u16;
+
     broadcast(
         can,
         MsgPriority::Slow,
         DATA_TYPE_ID_PANIC,
         node_id,
         transfer_id as u8,
-        &payload,
-        payload.len() as u16,
+        &mut payload,
+        len,
         fd_mode,
     )
 }
@@ -434,14 +462,16 @@ pub fn publish_temperature(
 
     let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
 
+    let len = payload.len() as u16;
+
     broadcast(
         can,
         MsgPriority::Nominal,
         DATA_TYPE_ID_PANIC,
         node_id,
         transfer_id as u8,
-        &payload,
-        payload.len() as u16,
+        &mut payload,
+   len,
         fd_mode,
     )
 }

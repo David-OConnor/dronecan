@@ -10,7 +10,7 @@
 
 use core::{
     convert::Infallible,
-    sync::atomic::{AtomicBool, Ordering},
+    sync::atomic::{self, AtomicBool, Ordering},
 };
 
 use fdcan::{
@@ -20,6 +20,8 @@ use fdcan::{
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
+
+use defmt::println;
 
 pub mod messages;
 pub mod gnss;
@@ -366,6 +368,7 @@ fn find_tail_byte_index(payload_len: u8) -> usize {
 fn can_send(
     can: &mut Can_,
     can_id: u32,
+    // frame_data: &'static [u8],
     frame_data: &[u8],
     frame_data_len: u8,
     fd_mode: bool,
@@ -395,6 +398,9 @@ fn can_send(
         bit_rate_switching: true, // todo?
         marker: None,
     };
+
+    // Not sure if this helps or is required etc.
+    atomic::compiler_fence(Ordering::SeqCst);
 
     match can.transmit(frame_header, frame_data) {
         Ok(_) => Ok(()),
@@ -517,13 +523,16 @@ fn send_multiple_frames(
 
 /// Send a DroneCAN "broadcast" message. See [The DroneCAN spec, transport layer page](https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/)
 /// Should be broadcast at interval between 2 and 1000ms.
+/// Note: The payload must be static, and include space for the tail byte.
 pub fn broadcast(
     can: &mut Can_,
     priority: MsgPriority,
     message_type_id: u16,
     source_node_id: u8,
     transfer_id: u8,
-    payload: &[u8],
+    // mutable for adding tail byte.
+    // payload: &'static mut [u8],
+    payload: &mut [u8],
     payload_len: u16,
     fd_mode: bool,
 ) -> Result<(), CanError> {
@@ -552,36 +561,47 @@ pub fn broadcast(
     let tail_byte = make_tail_byte(TransferComponent::SingleFrame, transfer_id);
     let tail_byte_i = find_tail_byte_index(payload_len as u8);
 
-    let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
+    payload[tail_byte_i] = tail_byte.value();
 
-    // todo: Not sure how to make this work without this DRY.
-    // if FD_MODE.load(Ordering::Acquire) {
-    if fd_mode {
-        let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_FD as usize];
-
-        payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-        payload_with_tail_byte[tail_byte_i] = tail_byte.value();
-
-        can_send(
-            can,
-            can_id.value(),
-            &payload_with_tail_byte[0..tail_byte_i + 1],
-            tail_byte_i as u8 + 1,
-            fd_mode,
-        )
-    } else {
-        let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
-        payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-        payload_with_tail_byte[tail_byte_i] = tail_byte.value();
-
-        can_send(
-            can,
-            can_id.value(),
-            &payload_with_tail_byte[0..tail_byte_i + 1],
-            tail_byte_i as u8 + 1,
-            fd_mode,
-        )
-    }
+    can_send(
+        can,
+        can_id.value(),
+        // &payload[0..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
+        &payload,
+        tail_byte_i as u8 + 1,
+        fd_mode,
+    )
+    //
+    // // let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
+    //
+    // // todo: Not sure how to make this work without this DRY.
+    // // if FD_MODE.load(Ordering::Acquire) {
+    // if fd_mode {
+    //     // let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_FD as usize];
+    //
+    //     payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+    //     payload_with_tail_byte[tail_byte_i] = tail_byte.value();
+    //
+    //     can_send(
+    //         can,
+    //         can_id.value(),
+    //         &payload_with_tail_byte[0..tail_byte_i + 1],
+    //         tail_byte_i as u8 + 1,
+    //         fd_mode,
+    //     )
+    // } else {
+    //     let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
+    //     payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+    //     payload_with_tail_byte[tail_byte_i] = tail_byte.value();
+    //
+    //     can_send(
+    //         can,
+    //         can_id.value(),
+    //         &payload_with_tail_byte[0..tail_byte_i + 1],
+    //         tail_byte_i as u8 + 1,
+    //         fd_mode,
+    //     )
+    // }
 }
 
 /// Function to help parse the nested result from CAN rx results

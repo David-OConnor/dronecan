@@ -23,6 +23,8 @@ packed_struct = {version = "^0.10.1", default_features = false }
 
 nb = "^1.1.0"  # For use with Fdcan lib's infallible type.
 
+defmt = "0.3.4"
+
 [features]
 g4 = ["fdcan/fdcan_g0_g4_l5",  "stm32-hal2/g431", "stm32-hal2/can_fd_g"]
 h7 = ["fdcan/fdcan_h7", "stm32-hal2/h743v", "stm32-hal2/can_fd_h"]

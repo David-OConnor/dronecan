@@ -52,8 +52,7 @@ pub struct EcefPositionVelocity {
 /// See `Fix2` data type. Contains the whole packet.
 /// See this for field descriptions.
 #[derive(PackedStruct)]
-// todo?
-#[packed_struct(bit_numbering = "msb0", endian = "lsb")] // todo: Bit little-endian?
+#[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct FixDronecan {
     #[packed_field(bits = "0..56")]
     pub timestamp: u64, // 56 bits
