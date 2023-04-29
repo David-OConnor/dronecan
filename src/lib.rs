@@ -23,10 +23,10 @@ use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
 
 use defmt::println;
 
-pub mod messages;
 pub mod gnss;
+pub mod messages;
 
-pub use messages::{*};
+pub use messages::*;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -158,7 +158,7 @@ impl MsgPriority {
             4 => Self::Nominal,
             5 => Self::Low,
             6 => Self::Slow,
-            _ => Self::Other(val)
+            _ => Self::Other(val),
         }
     }
 }
@@ -353,14 +353,41 @@ impl Signature {
 
 /// Determine the index for placing the tail byte of the payload. This procedure doesn't appear to
 /// be defined in the docs, but is defined in official software implementations.
-fn find_tail_byte_index(payload_len: u8) -> usize {
-    const DATA_LENGTHS: [u8; 8] = [8, 12, 16, 20, 24, 32, 48, 64];
-
-    for data_len in &DATA_LENGTHS {
-        if payload_len <= *data_len {
-            return *data_len as usize - 1;
-        }
+///
+/// Const fn for use in creating statically-sized buffers.
+const fn find_tail_byte_index(payload_len: u8) -> usize {
+    // We take this comparatively verbose approach vice the loop below to be compatible
+    // with const fns.
+    if payload_len <= 8 {
+        return 7;
     }
+    if payload_len <= 12 {
+        return 11;
+    }
+    if payload_len <= 16 {
+        return 15;
+    }
+    if payload_len <= 20 {
+        return 19;
+    }
+    if payload_len <= 24 {
+        return 23;
+    }
+    if payload_len <= 32 {
+        return 31;
+    }
+    if payload_len <= 48 {
+        return 47;
+    }
+
+    // const DATA_LENGTHS: [u8; 8] = [8, 12, 16, 20, 24, 32, 48, 64];
+    //
+    // for data_len in &DATA_LENGTHS {
+    //     if payload_len <= *data_len {
+    //         return *data_len as usize - 1;
+    //     }
+    // }
+
     63
 }
 
@@ -368,7 +395,6 @@ fn find_tail_byte_index(payload_len: u8) -> usize {
 fn can_send(
     can: &mut Can_,
     can_id: u32,
-    // frame_data: &'static [u8],
     frame_data: &[u8],
     frame_data_len: u8,
     fd_mode: bool,
@@ -400,14 +426,17 @@ fn can_send(
     };
 
     // Not sure if this helps or is required etc.
-    atomic::compiler_fence(Ordering::SeqCst);
+    // atomic::compiler_fence(Ordering::SeqCst);
+
+    while !can.is_transmitter_idle() {} // todo: Troubleshooting demons. Not seeming to help.
+
+    // todo: transmit_preserve?
 
     match can.transmit(frame_header, frame_data) {
         Ok(_) => Ok(()),
         Err(e) => Err(CanError::CanHardware),
     }
 }
-
 
 /// Construct a tail byte. See DroneCAN Spec, CAN bus transport layer.
 /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
@@ -429,7 +458,7 @@ fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> Tail
         TransferComponent::MultiMid(toggle_prev) => {
             start_of_transfer = false;
             end_of_transfer = false;
-            toggle = ! toggle_prev;
+            toggle = !toggle_prev;
         }
         TransferComponent::MultiEnd(toggle_prev) => {
             start_of_transfer = false;
@@ -449,7 +478,6 @@ fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> Tail
         transfer_id,
     }
 }
-
 
 /// Handles splitting a payload into multiple frames, including DroneCAN and Cyphal requirements,
 /// eg CRC and data type signature.
@@ -537,8 +565,8 @@ pub fn broadcast(
     fd_mode: bool,
 ) -> Result<(), CanError> {
     let can_id = CanId {
-        priority, 
-        message_type_id, 
+        priority,
+        message_type_id,
         source_node_id,
         service: false, // todo: Customizable.
     };
