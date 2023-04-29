@@ -403,6 +403,7 @@ fn can_send(
     frame_data_len: u8,
     fd_mode: bool,
 ) -> Result<(), CanError> {
+
     let max_frame_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
@@ -425,26 +426,17 @@ fn can_send(
         len: frame_data_len,
         frame_format,
         id,
-        bit_rate_switching: true, // todo?
+        bit_rate_switching: true,
         marker: None,
     };
 
     // Not sure if this helps or is required etc.
     // atomic::compiler_fence(Ordering::SeqCst);
 
-    while !can.is_transmitter_idle() {} // todo: Troubleshooting demons. Not seeming to help.
-
-    // todo: transmit_preserve?
-
     match can.transmit_preserve(frame_header, frame_data, &mut message_pending_handler) {
         Ok(_) => Ok(()),
         Err(e) => Err(CanError::CanHardware),
     }
-
-    // match can.transmit(frame_header, frame_data) {
-    //     Ok(_) => Ok(()),
-    //     Err(e) => Err(CanError::CanHardware),
-    // }
 }
 
 /// Construct a tail byte. See DroneCAN Spec, CAN bus transport layer.
@@ -605,40 +597,9 @@ pub fn broadcast(
         can_id.value(),
         // &payload[0..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
         &payload,
-        tail_byte_i as u8 + 1,
+        payload_len as u8,
         fd_mode,
     )
-    //
-    // // let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
-    //
-    // // todo: Not sure how to make this work without this DRY.
-    // // if FD_MODE.load(Ordering::Acquire) {
-    // if fd_mode {
-    //     // let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_FD as usize];
-    //
-    //     payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-    //     payload_with_tail_byte[tail_byte_i] = tail_byte.value();
-    //
-    //     can_send(
-    //         can,
-    //         can_id.value(),
-    //         &payload_with_tail_byte[0..tail_byte_i + 1],
-    //         tail_byte_i as u8 + 1,
-    //         fd_mode,
-    //     )
-    // } else {
-    //     let mut payload_with_tail_byte = [0; DATA_FRAME_MAX_LEN_LEGACY as usize];
-    //     payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-    //     payload_with_tail_byte[tail_byte_i] = tail_byte.value();
-    //
-    //     can_send(
-    //         can,
-    //         can_id.value(),
-    //         &payload_with_tail_byte[0..tail_byte_i + 1],
-    //         tail_byte_i as u8 + 1,
-    //         fd_mode,
-    //     )
-    // }
 }
 
 /// Function to help parse the nested result from CAN rx results

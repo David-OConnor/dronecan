@@ -54,9 +54,18 @@ static mut BUF_NODE_INFO: [u8; 64] = [0; 64];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
-static mut BUF_TEMP: [u8; 8] = [0; 8];
+static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut CAN_BUF_RX: [u8; 64] = [0; 64];
 
+use defmt::println;
+
+
+// todo t
+use fdcan::{
+    frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
+    id::{ExtendedId, Id},
+    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
+};
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -419,10 +428,10 @@ pub fn publish_static_pressure(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_PRESSURE as u8) + 1];
     let mut buf = unsafe { &mut BUF_PRESSURE };
 
-    buf[0..4].clone_from_slice(&pressure.to_le_bytes());
+    buf[0..4].copy_from_slice(&pressure.to_le_bytes());
 
     let pressure_variance = f16::from_f32(pressure_variance);
-    buf[4..6].clone_from_slice(&pressure_variance.to_le_bytes());
+    buf[4..6].copy_from_slice(&pressure_variance.to_le_bytes());
 
     let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
 
@@ -447,7 +456,7 @@ pub fn publish_temperature(
     node_id: u8,
 ) -> Result<(), CanError> {
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_TEMPERATURE as u8) + 1];
-    let mut buf = unsafe { &mut BUF_PRESSURE };
+    let mut buf = unsafe { &mut BUF_TEMPERATURE };
 
     let temperature = f16::from_f32(temperature);
     buf[0..2].clone_from_slice(&temperature.to_le_bytes());
@@ -455,7 +464,7 @@ pub fn publish_temperature(
     let temperature_variance = f16::from_f32(temperature_variance);
     buf[2..4].clone_from_slice(&temperature_variance.to_le_bytes());
 
-    let transfer_id = TRANSFER_ID_STATIC_PRESSURE.fetch_add(1, Ordering::Relaxed);
+    let transfer_id = TRANSFER_ID_STATIC_TEMPERATURE.fetch_add(1, Ordering::Relaxed);
 
     broadcast(
         can,
