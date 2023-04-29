@@ -87,8 +87,8 @@ pub struct NodeStatus {
 }
 
 impl NodeStatus {
-    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_STATIC_PRESSURE] {
-        let mut result = [0; PAYLOAD_SIZE_STATIC_PRESSURE];
+    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_NODE_STATUS] {
+        let mut result = [0; PAYLOAD_SIZE_NODE_STATUS];
 
         result[0..4].clone_from_slice(&self.uptime_sec.to_le_bytes());
 
@@ -190,10 +190,10 @@ pub fn publish_node_status(
         vendor_specific_status_code,
     };
 
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_STATUS as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_STATUS as u8) + 1];
     // let mut buf = unsafe { &mut BUF_NODE_STATUS };
 
-    buf[0..PAYLOAD_SIZE_STATIC_PRESSURE].clone_from_slice(&status.to_bytes());
+    buf[0..PAYLOAD_SIZE_NODE_STATUS].clone_from_slice(&status.to_bytes());
 
     let transfer_id = TRANSFER_ID_NODE_STATUS.fetch_add(1, Ordering::Relaxed);
 
@@ -224,7 +224,7 @@ pub fn publish_node_info(
     node_id: u8,
 ) -> Result<(), CanError> {
     // todo: We have temporarily hardcoded this buffer fo a name len of 8.
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_INFO as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_INFO as u8) + 1];
     // let mut buf = unsafe { &mut BUF_NODE_INFO};
 
     let status = NodeStatus {
@@ -264,7 +264,7 @@ pub fn publish_transport_stats(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TRANSPORT_STATS as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TRANSPORT_STATS as u8) + 1];
     // let mut buf = unsafe { &mut BUF_TRANSPORT_STATS };
 
     buf[0..6].clone_from_slice(&num_transmitted.to_le_bytes()[0..6]);
@@ -367,7 +367,7 @@ pub fn publish_time_sync(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TIME_SYNC as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TIME_SYNC as u8) + 1];
     // let mut buf = unsafe { &mut BUF_TIME_SYNC };
 
     buf[0..7].clone_from_slice(
@@ -416,8 +416,9 @@ pub fn publish_static_pressure(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_PRESSURE as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_PRESSURE as u8) + 1];
     // let mut buf = unsafe { &mut BUF_PRESSURE };
+
     buf[0..4].clone_from_slice(&pressure.to_le_bytes());
 
     let pressure_variance = f16::from_f32(pressure_variance);
@@ -445,11 +446,11 @@ pub fn publish_temperature(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_TEMPERATURE as u8)];
+    let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_TEMPERATURE as u8) + 1];
     // let mut buf = unsafe { &mut BUF_PRESSURE };
 
     let temperature = f16::from_f32(temperature);
-    buf.clone_from_slice(&temperature.to_le_bytes());
+    buf[0..2].clone_from_slice(&temperature.to_le_bytes());
 
     let temperature_variance = f16::from_f32(temperature_variance);
     buf[2..4].clone_from_slice(&temperature_variance.to_le_bytes());
