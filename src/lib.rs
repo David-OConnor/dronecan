@@ -16,7 +16,7 @@ use core::{
 use fdcan::{
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
     id::{ExtendedId, Id},
-    FdCan, NormalOperationMode, ReceiveOverrun,
+    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
@@ -391,6 +391,10 @@ const fn find_tail_byte_index(payload_len: u8) -> usize {
     63
 }
 
+fn message_pending_handler(mailbox: Mailbox, header: TxFrameHeader, buf: &[u32]) {
+    println!("Mailbox overflow!");
+}
+
 /// Write out packet to the CAN peripheral.
 fn can_send(
     can: &mut Can_,
@@ -432,10 +436,15 @@ fn can_send(
 
     // todo: transmit_preserve?
 
-    match can.transmit(frame_header, frame_data) {
+    match can.transmit_preserve(frame_header, frame_data, &mut message_pending_handler) {
         Ok(_) => Ok(()),
         Err(e) => Err(CanError::CanHardware),
     }
+
+    // match can.transmit(frame_header, frame_data) {
+    //     Ok(_) => Ok(()),
+    //     Err(e) => Err(CanError::CanHardware),
+    // }
 }
 
 /// Construct a tail byte. See DroneCAN Spec, CAN bus transport layer.
