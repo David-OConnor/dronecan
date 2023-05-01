@@ -430,6 +430,9 @@ fn can_send(
         marker: None,
     };
 
+    // This wait appears to be required, pending handling using a queue in the callback.
+    while !can.is_transmitter_idle() {}
+
     // Not sure if this helps or is required etc.
     // atomic::compiler_fence(Ordering::SeqCst);
 
@@ -514,39 +517,39 @@ fn send_multiple_frames(
 
     let mut latest_i_sent = 6;
 
-    // while latest_i_sent < payload_len {
-    //     let mut payload_to_send = if FD_MODE.load(Ordering::Acquire) {
-    //         &[0; DATA_FRAME_MAX_LEN_FD as usize][..]
-    //     } else {
-    //         &[0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
-    //     };
-    //
-    //     let payload_to_send = if let TransferComponent::MultiEnd(_) = component {
-    //         let tail_byte = make_tail_byte(component, transfer_id);
-    //         payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-    //         payload_with_tail_byte[payload_len as usize] = tail_byte;
-    //
-    //         payload_with_tail_byte
-    //     } else {
-    //         payload
-    //     };
-    //
-    //     can_send(can, can_id, payload_to_send, MAX_PAYLOAD_SIZE as u8)?;
-    //
-    //     match component {
-    //         TransferComponent::MultiStart => {
-    //             component = TransferComponent::MultiMid(false);
-    //         }
-    //         TransferComponent::MultiMid(toggle_prev) => {
-    //             component = TransferComponent::MultiMid(toggle_prev);
-    //             // todo: End if at end.
-    //         }
-    //         TransferComponent::MultiEnd(_) => break,
-    //         TransferComponent::SingleFrame => panic!("Single frame transfer; code logic error"),
-    //     }
-    //
-    //     latest_i_sent += 7; // 8 byte frame size, - 1 for each frame's tail byte.
-    // }
+    while latest_i_sent < payload_len {
+        let mut payload_to_send = if FD_MODE.load(Ordering::Acquire) {
+            &[0; DATA_FRAME_MAX_LEN_FD as usize][..]
+        } else {
+            &[0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
+        };
+
+        let payload_to_send = if let TransferComponent::MultiEnd(_) = component {
+            let tail_byte = make_tail_byte(component, transfer_id);
+            payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
+            payload_with_tail_byte[payload_len as usize] = tail_byte;
+
+            payload_with_tail_byte
+        } else {
+            payload
+        };
+
+        can_send(can, can_id, payload_to_send, MAX_PAYLOAD_SIZE as u8)?;
+
+        match component {
+            TransferComponent::MultiStart => {
+                component = TransferComponent::MultiMid(false);
+            }
+            TransferComponent::MultiMid(toggle_prev) => {
+                component = TransferComponent::MultiMid(toggle_prev);
+                // todo: End if at end.
+            }
+            TransferComponent::MultiEnd(_) => break,
+            TransferComponent::SingleFrame => panic!("Single frame transfer; code logic error"),
+        }
+
+        latest_i_sent += 7; // 8 byte frame size, - 1 for each frame's tail byte.
+    }
     return Ok(());
 }
 
