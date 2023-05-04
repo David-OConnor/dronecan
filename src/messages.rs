@@ -4,6 +4,8 @@
 
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
+use packed_struct::PackedStruct;
+
 use crate::{broadcast, Can, CanError, MsgPriority};
 
 use half::f16;
@@ -88,14 +90,14 @@ static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
 use defmt::println;
 
 // todo t
-use fdcan::{
-    FdCan,
-    frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
-};
 use crate::{
     gnss::GlobalNavSolution,
-    types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion}
+    types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion},
+};
+use fdcan::{
+    frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
+    id::{ExtendedId, Id},
+    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
@@ -428,7 +430,7 @@ pub fn publish_global_navigation_solution(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
     let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
 
-    buf[..PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION].clone_from_slice(&data.to_bytes());
+    buf[..PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION].clone_from_slice(&data.pack().unwrap());
 
     let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
 

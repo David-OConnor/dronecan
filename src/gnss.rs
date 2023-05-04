@@ -1,8 +1,8 @@
 //! This module includes code related to the FIX2 Dronecan standard.
 
-use packed_struct::{PackedStruct, prelude::*};
-use half::f16;
 use crate::PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION;
+use half::f16;
+use packed_struct::{prelude::*, PackedStruct};
 
 #[derive(Clone, Copy, PrimitiveEnum_u8)]
 #[repr(u8)]
@@ -56,11 +56,11 @@ pub struct EcefPositionVelocity {
 #[derive(PackedStruct)]
 #[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct FixDronecan {
-    #[packed_field(size_bytes = "7")]
+    #[packed_field(bytes = "0..7")]
     pub timestamp: u64, // 56 bits
     #[packed_field(size_bytes = "7")]
     pub gnss_timestamp: u64, // 56 bits
-    #[packed_field(size_bits = "3")]
+    #[packed_field(size_bits = "3", ty = "enum")]
     pub gnss_time_standard: GnssTimeStandard, // 3 bits
     // 13-bit pad todo!!
     #[packed_field(size_bytes = "1")]
@@ -78,7 +78,7 @@ pub struct FixDronecan {
     pub ned_velocity: [u32; 3], // todo: packed_struct currently doesn't support float.
     #[packed_field(size_bits = 6)]
     pub sats_used: u8, // 6 bits.
-    #[packed_field(size_bites = 2, ty = "enum")]
+    #[packed_field(size_bits = "2", ty = "enum")]
     pub fix_status: FixStatus, // 2 bits.
     #[packed_field(size_bits = "4", ty = "enum")]
     pub mode: GnssMode, // 4 bits.
@@ -100,7 +100,7 @@ pub struct FixDronecan {
     #[packed_field(size_bytes = "2")]
     // pub pdop: f32, // 16 bits
     pub pdop: u16, // 16 bits  // todo: packed_struct currently doesn't support float.
-    // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
+                   // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
@@ -108,9 +108,9 @@ pub struct FixDronecan {
 #[derive(PackedStruct)]
 #[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct GlobalNavSolution {
-    // Note; Most of these are float fields; we use ints here due to limitations in 
+    // Note; Most of these are float fields; we use ints here due to limitations in
     // `packed_struct`.
-    #[packed_field(size_bytes = "7")]
+    #[packed_field(bytes = "0..7")]
     pub timestamp: u64,
     #[packed_field(size_bytes = "8")]
     pub longitude: u64,
@@ -140,7 +140,7 @@ pub struct GlobalNavSolution {
     pub angular_velocity_body: [u32; 3],
     #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
-    // (skipping velocity covariance)
+                                            // (skipping velocity covariance)
 }
 //
 // impl GlobalNavSolution {

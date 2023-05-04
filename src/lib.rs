@@ -14,9 +14,9 @@ use core::{
 };
 
 use fdcan::{
-    FdCan,
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
+    id::{ExtendedId, Id},
+    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};

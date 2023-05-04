@@ -1,6 +1,8 @@
 //! This module contains types associated with Dronecan messages.
 
-use crate::PAYLOAD_SIZE_NODE_STATUS;
+use bitvec::prelude::*;
+
+use crate::{CanError, PAYLOAD_SIZE_NODE_STATUS};
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
 pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
@@ -59,7 +61,7 @@ pub enum NodeHealth {
 #[repr(u8)]
 pub enum OpcodeType {
     Save = 0,
-    Erase = 1
+    Erase = 1,
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/10.ExecuteOpcode.uavcan
@@ -72,18 +74,22 @@ pub struct ExecuteOpcode {
 
 impl ExecuteOpcode {
     pub fn from_bytes(buf: &[u8]) -> Self {
-        let opcode = if buf[0] == 1 { OpcodeType::Erase } else { OpcodeType::Save };
+        let opcode = if buf[0] == 1 {
+            OpcodeType::Erase
+        } else {
+            OpcodeType::Save
+        };
 
         let error_code_val = i64::from_le_bytes(buf[56..104].try_into().unwrap());
-        let error_code = match error_code_val  {
+        let error_code = match error_code_val {
             0 => None,
-            _ => Some(error_code_val)
+            _ => Some(error_code_val),
         };
 
         Self {
             opcode,
             error_code,
-            ok: buf[104] != 0
+            ok: buf[104] != 0,
         }
     }
 }
@@ -92,7 +98,7 @@ impl ExecuteOpcode {
 /// `uavcan.protocol.param.NumericValue`
 /// 2-bit tag.
 #[derive(Clone, Copy)]
-enum NumericValue {
+pub enum NumericValue {
     Integer(i64),
     Real(f32),
 }
@@ -101,7 +107,7 @@ enum NumericValue {
 /// `uavcan.protocol.param.Value`
 /// 3-bit tag with 5-bit prefix for alignment.
 #[derive(Clone, Copy)]
-enum Value<'a> {
+pub enum Value<'a> {
     Integer(i64),
     Real(f32),
     Boolean(bool), // u8 repr
@@ -114,8 +120,9 @@ pub struct GetSet<'a> {
     pub index: u16, // 13 bits
     /// If set - parameter will be assigned this value, then the new value will be returned.
     /// If not set - current parameter value will be returned.
-    pub value: Value<'a>,
-    pub name: &'a [u8], // up to 92 bytes.
+    pub value1: Value<'a>,
+    // pub name: &'a [u8], // up to 92 bytes.
+    pub name: [u8; 30], // large enough for many uses
     /// For set requests, it should contain the actual parameter value after the set request was
     /// executed. The objective is to let the client know if the value could not be updated, e.g.
     /// due to its range violation, etc.
@@ -126,7 +133,7 @@ pub struct GetSet<'a> {
     pub min_value: Option<NumericValue>,
 }
 
-impl <'a> GetSet<'a> {
+impl<'a> GetSet<'a> {
     // pub fn to_bytes(buf: &[u8]) -> Self {
     //     let index
     //     Self {
@@ -140,42 +147,79 @@ impl <'a> GetSet<'a> {
     //     }
     // }
 
-    // todo: SHould probably be a Result, not Option.
-    pub fn from_bytes(buf: &[u8]) -> Option<Self> {
-        let index = u16::from_le_bytes([buf[0], buf[1] & 0b0001_1111]);
+    pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
+        const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
+        let bits = buf.view_bits::<Lsb0>();
 
-        let value_type = match (buf[1] >> 5) & 1 {
-            0 => {
-                Value::Integer(
-                    i64::from_le_bytes(
-                        ((buf[1] >> 6) & 0b11) | (buf[2] & 0b),
-                    )
-                )
-            }
+        let index = bits[0..13].load_le::<u16>();
+
+        let value_start_i = 13;
+
+        let value1 = match bits[value_start_i..value_start_i + 8].load_le::<u8>() {
+            0 => Value::Integer(bits[value_start_i + 8..value_start_i + 8 + 64].load_le::<i64>()),
             1 => {
-                unimplemented!()
-                // Value::Real()
+                // No support for floats?
+                let as_u32 = bits[value_start_i + 8..value_start_i + 8 + 32].load_le::<u32>();
+                Value::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
             }
             2 => {
-                unimplemented!()
-                // Value::Boolean()
+                Value::Boolean(bits[value_start_i + 8..value_start_i + 8 + 8].load_le::<u8>() != 0)
             }
-            3 => {
-                unimplemented!()
-                // Value::String()
-            }
-            _ => return None,
+            // todo: Impl string.
+            // 3 => Value::String(bits[21..85].load_le::<i64>()),
+            _ => return Err(CanError::PayloadData),
         };
 
-        Self {
+        let name_len_i = match value1 {
+            Value::Integer(_) => value_start_i + 8 + 64,
+            Value::Real(_) => value_start_i + 8 + 32,
+            Value::Boolean(_) => value_start_i + 8 + 8,
+            Value::String(_) => 0, // todo
+        };
+
+        let name_len = bits[name_len_i..name_len_i + NAME_LEN_BIT_SIZE].load_le::<u8>() as usize;
+
+        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+
+        // todo: COnvert name to a byte array or str.
+        // let name = bits[name_start_i..name_start_i + name_len];
+        let mut name = [0; 30]; // todo!
+
+        // let name = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
+
+        // Includes a `void5` spacer.
+        let value2_start_i = name_start_i + name_len + 5;
+
+        // todo: DRY. Put in a sep fn etc.
+        let value2 = match bits[value2_start_i..value2_start_i + 8].load_le::<u8>() {
+            0 => Value::Integer(bits[value2_start_i + 8..value2_start_i + 8 + 64].load_le::<i64>()),
+            1 => {
+                // No support for floats?
+                let as_u32 = bits[value2_start_i + 8..value2_start_i + 8 + 32].load_le::<u32>();
+                Value::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
+            }
+            2 => Value::Boolean(
+                bits[value2_start_i + 8..value2_start_i + 8 + 8].load_le::<u8>() != 0,
+            ),
+            // todo: Impl string.
+            // 3 => Value::String(bits[21..85].load_le::<i64>()),
+            _ => return Err(CanError::PayloadData),
+        };
+
+        // todo: Max, min and default values
+        let default_value = None;
+        let max_value = None;
+        let min_value = None;
+
+        Ok(Self {
             index,
-            value,
+            value1,
             name,
             value2,
             default_value,
             max_value,
             min_value,
-        }
+        })
     }
 }
 
@@ -190,7 +234,7 @@ pub struct HardwareVersion {
     /// All zeros is not a valid UID.
     /// If filled with zeros, assume that the value is undefined.
     pub unique_id: [u8; 16],
-    /// Certificate of authenticity (COA) of the hardware, 255 bytes max.
+    // /// Certificate of authenticity (COA) of the hardware, 255 bytes max.
     // pub certificate_of_authority: &'a [u8],
     // pub certificate_of_authority: u8, // todo: Hardcoded as 1 byte.
 }
