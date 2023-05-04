@@ -90,6 +90,7 @@ impl ExecuteOpcode {
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/NumericValue.uavcan
 /// `uavcan.protocol.param.NumericValue`
+/// 2-bit tag.
 #[derive(Clone, Copy)]
 enum NumericValue {
     Integer(i64),
@@ -98,6 +99,7 @@ enum NumericValue {
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/Value.uavcan
 /// `uavcan.protocol.param.Value`
+/// 3-bit tag with 5-bit prefix for alignment.
 #[derive(Clone, Copy)]
 enum Value<'a> {
     Integer(i64),
@@ -113,7 +115,6 @@ pub struct GetSet<'a> {
     /// If set - parameter will be assigned this value, then the new value will be returned.
     /// If not set - current parameter value will be returned.
     pub value: Value<'a>,
-    // pub name: [u8; 20], // up to 92 bytes.
     pub name: &'a [u8], // up to 92 bytes.
     /// For set requests, it should contain the actual parameter value after the set request was
     /// executed. The objective is to let the client know if the value could not be updated, e.g.
@@ -126,19 +127,54 @@ pub struct GetSet<'a> {
 }
 
 impl <'a> GetSet<'a> {
-    pub fn from_bytes(buf: &[u8]) -> Self {
-        let opcode = if buf[0] == 1 { OpcodeType::Erase } else { OpcodeType::Save };
+    // pub fn to_bytes(buf: &[u8]) -> Self {
+    //     let index
+    //     Self {
+    //         index,
+    //         value,
+    //         name,
+    //         value2,
+    //         default_value,
+    //         max_value,
+    //         min_value,
+    //     }
+    // }
 
-        let error_code_val = i64::from_le_bytes(buf[56..104].try_into().unwrap());
-        let error_code = match error_code_val {
-            0 => None,
-            _ => Some(error_code_val)
+    // todo: SHould probably be a Result, not Option.
+    pub fn from_bytes(buf: &[u8]) -> Option<Self> {
+        let index = u16::from_le_bytes([buf[0], buf[1] & 0b0001_1111]);
+
+        let value_type = match (buf[1] >> 5) & 1 {
+            0 => {
+                Value::Integer(
+                    i64::from_le_bytes(
+                        ((buf[1] >> 6) & 0b11) | (buf[2] & 0b),
+                    )
+                )
+            }
+            1 => {
+                unimplemented!()
+                // Value::Real()
+            }
+            2 => {
+                unimplemented!()
+                // Value::Boolean()
+            }
+            3 => {
+                unimplemented!()
+                // Value::String()
+            }
+            _ => return None,
         };
 
         Self {
-            opcode,
-            error_code,
-            ok: buf[104] != 0
+            index,
+            value,
+            name,
+            value2,
+            default_value,
+            max_value,
+            min_value,
         }
     }
 }

@@ -56,34 +56,34 @@ pub struct EcefPositionVelocity {
 #[derive(PackedStruct)]
 #[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct FixDronecan {
-    #[packed_field(bytes = "0..7")]
+    #[packed_field(size_bytes = "7")]
     pub timestamp: u64, // 56 bits
-    #[packed_field(bytes = "7..14")]
+    #[packed_field(size_bytes = "7")]
     pub gnss_timestamp: u64, // 56 bits
-    #[packed_field(bits = "112..115", ty = "enum")]
+    #[packed_field(size_bits = "3")]
     pub gnss_time_standard: GnssTimeStandard, // 3 bits
-    // 13-bit pad
-    #[packed_field(bytes = "16..17")]
+    // 13-bit pad todo!!
+    #[packed_field(size_bytes = "1")]
     pub num_leap_seconds: u8, // 0 for unknown
-    #[packed_field(bits = "137..174")]
+    #[packed_field(size_bits = "37")]
     pub longitude_deg_1e8: i64, // 37 bits
-    #[packed_field(bits = "174..211")]
+    #[packed_field(size_bits = "37")]
     pub latitude_deg_1e8: i64, // 37 bits
-    #[packed_field(bits = "211..238")]
+    #[packed_field(size_bits = "27")]
     pub height_ellipsoid_mm: i32, // 27 bits
-    #[packed_field(bits = "238..265")]
+    #[packed_field(size_bits = "27")]
     pub height_msl_mm: i32, // 27 bits
-    #[packed_field(bits = "265..361")]
+    #[packed_field(element_size_bytes = "4")]
     // pub ned_velocity: [f32; 3],
     pub ned_velocity: [u32; 3], // todo: packed_struct currently doesn't support float.
-    #[packed_field(bits = "361..367")]
+    #[packed_field(size_bits = 6)]
     pub sats_used: u8, // 6 bits.
-    #[packed_field(bits = "367..369", ty = "enum")]
+    #[packed_field(size_bites = 2, ty = "enum")]
     pub fix_status: FixStatus, // 2 bits.
-    #[packed_field(bits = "369..373", ty = "enum")]
+    #[packed_field(size_bits = "4", ty = "enum")]
     pub mode: GnssMode, // 4 bits.
-    #[packed_field(bits = "373..379", ty = "enum")]
-    pub sub_mode: GnssSubMode, // 6 bits. todo: Why 6 bits?
+    #[packed_field(size_bits = "6", ty = "enum")]
+    pub sub_mode: GnssSubMode, // 6 bits.
     /// Note re variable-length arrays in DroneCAN:
     /// "Normally, a dynamic array will be encoded as a sequence of encoded items,
     /// prepended with an unsigned integer field representing the number of contained items
@@ -93,11 +93,11 @@ pub struct FixDronecan {
     /// bits, or if the maximum number of items is 1, the length field bit width will be just a
     /// single bit.
     ///
-    /// For len of 36, we get 5.2. So, 6-bits len field?
+    /// For len of 36, we get 5.2. So, 6-bits len field.
     // pub covariance: [Option<f32>; 36], // todo: [f16; <=36?] // todo: Currently unused.
-    #[packed_field(bits = "379..385")]
+    #[packed_field(size_bits = "6")]
     pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
-    #[packed_field(bits = "385..401")]
+    #[packed_field(size_bytes = "2")]
     // pub pdop: f32, // 16 bits
     pub pdop: u16, // 16 bits  // todo: packed_struct currently doesn't support float.
     // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
@@ -108,35 +108,37 @@ pub struct FixDronecan {
 #[derive(PackedStruct)]
 #[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct GlobalNavSolution {
-    #[packed_field(bytes = "0..7")]
+    // Note; Most of these are float fields; we use ints here due to limitations in 
+    // `packed_struct`.
+    #[packed_field(size_bytes = "7")]
     pub timestamp: u64,
-    #[packed_field(bytes = "7..15")]
-    pub longitude: f64,
-    #[packed_field(bytes = "15..23")]
-    pub latitude: f64,
-    #[packed_field(bytes = "23..27")]
-    pub height_ellipsoid: f32,
-    #[packed_field(bytes = "27..31")]
-    pub height_msl: f32,
-    #[packed_field(bytes = "31..35")]
-    pub height_agl: f32,
-    #[packed_field(bytes = "35..39")]
-    pub height_baro: f32,
-    #[packed_field(bytes = "39..41")] // todo: How does this work with options?
+    #[packed_field(size_bytes = "8")]
+    pub longitude: u64,
+    #[packed_field(size_bytes = "8")]
+    pub latitude: u64,
+    #[packed_field(size_bytes = "4")]
+    pub height_ellipsoid: u32,
+    #[packed_field(size_bytes = "4")]
+    pub height_msl: u32,
+    #[packed_field(size_bytes = "4")]
+    pub height_agl: u32,
+    #[packed_field(size_bytes = "4")]
+    pub height_baro: u32,
+    #[packed_field(size_bytes = "2")] // todo: How does this work with options?
     // pub qnh_hpa: Option<f16>,
     pub qnh_hpa: u16, // todo: Currently unused.
-    #[packed_field(bytes = "41..57")]
-    pub orientation_xyzw: [f32; 4],
+    #[packed_field(element_size_bytes = "4")]
+    pub orientation_xyzw: [u32; 4],
     // We just use a 0 for this for the mandatory len; see notes in `Fix2`,
     // and chapter 3 of the dronecan spec.
-    #[packed_field(bits = "456..462")]
+    #[packed_field(size_bits = "6")]
     pub pose_covariance: u8,
     // (skipping pose covariance)
-    #[packed_field(bits = "462..558")]
-    pub linear_velocity_body: [f32; 3],
-    #[packed_field(bits = "558..654")]
-    pub angular_velocity_body: [f32; 3],
-    #[packed_field(bits = "654..700")]
+    #[packed_field(element_size_bytes = "4")]
+    pub linear_velocity_body: [u32; 3],
+    #[packed_field(element_size_bytes = "4")]
+    pub angular_velocity_body: [u32; 3],
+    #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
     // (skipping velocity covariance)
 }
