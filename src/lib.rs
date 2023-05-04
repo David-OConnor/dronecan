@@ -33,6 +33,25 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
 
+// Enough for global navigation solution, our current largest payload, + crc.
+// Static buffers for splitting up mult-frame payloads.
+// static mut MULTI_FRAME_BUFS_LEGACY: [[u8; 8]; 10] = [
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+//     [0; 8],
+// ];
+
+static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
+    [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64],
+];
+
 // static FD_MODE: AtomicBool = AtomicBool::new(true);
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
@@ -40,8 +59,6 @@ static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 const CRC_POLY: u16 = 0x1021;
 const SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
 const SIGNATURE_MASK64: u64 = 0xFFFF_FFFF_FFFF_FFFF;
-
-pub const CONFIG_COMMON_SIZE: usize = 4;
 
 #[derive(Clone, Copy)]
 pub enum CanError {
@@ -82,8 +99,8 @@ impl ConfigCommon {
         }
     }
 
-    pub fn to_bytes(&self) -> [u8; CONFIG_COMMON_SIZE] {
-        let mut result = [0; CONFIG_COMMON_SIZE];
+    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_CONFIG_COMMON] {
+        let mut result = [0; PAYLOAD_SIZE_CONFIG_COMMON];
 
         result[0] = self.node_id;
         result[1] = self.fd_mode as u8;
@@ -161,6 +178,23 @@ impl MsgPriority {
             _ => Self::Other(val),
         }
     }
+}
+
+/// `uavcan.protocol.param.NumericValue`
+#[derive(Clone, Copy)]
+enum NumericValue {
+    Integer(i64),
+    Real(f32),
+}
+
+/// `uavcan.protocol.param.Value`
+#[derive(Clone, Copy)]
+enum Value<'a> {
+    Integer(i64),
+    Real(f32),
+    Boolean(bool), // u8 repr
+    /// Max length of 128 bytes.
+    String(&'a [u8]),
 }
 
 /// Code for computing CRC for multi-frame transfers:
@@ -403,7 +437,6 @@ fn can_send(
     frame_data_len: u8,
     fd_mode: bool,
 ) -> Result<(), CanError> {
-
     let max_frame_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
@@ -491,10 +524,13 @@ fn send_multiple_frames(
     payload_len: u16,
     can_id: u32,
     transfer_id: u8,
+    fd_mode: bool,
 ) -> Result<(), CanError> {
-    // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
-    // "Multi-frame transfer" re requirements such as CRC and Toggle bit.
-    let mut component = TransferComponent::MultiStart;
+    let frame_payload_len = if fd_mode {
+        DATA_FRAME_MAX_LEN_FD as usize
+    } else {
+        DATA_FRAME_MAX_LEN_LEGACY as usize
+    };
 
     let mut crc = TransferCrc::new();
     // "The Transfer CRC is computed from the transfer payload, prepended with a data type
@@ -508,48 +544,81 @@ fn send_multiple_frames(
     crc.add_bytes(&signature.value().to_le_bytes());
     crc.add_bytes(payload);
 
-    // todo: How do we apply the (u16) crc to the start of the message?
-    // todo: Modify this for multi-frame FDcan xfers.
-    let mut current_frame_buf = [0; 8];
+    // We use slices of the FD buf, even for legacy frames, to keep code simple.
+    let bufs = unsafe { &mut MULTI_FRAME_BUFS_FD };
 
-    current_frame_buf[0..2].clone_from_slice(&crc.value.to_le_bytes());
-    current_frame_buf[6..8].clone_from_slice(&payload[0..6]);
+    // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
+    // "Multi-frame transfer" re requirements such as CRC and Toggle bit.
+    let mut component = TransferComponent::MultiStart;
+    let mut active_frame = 0;
+    // This tracks the index of the payload we sent in the previous frame.
 
-    let mut latest_i_sent = 6;
+    // Populate the first frame. This is different from the others due to the CRC.
+    let mut tail_byte = make_tail_byte(TransferComponent::MultiStart, transfer_id);
+    let mut payload_len_this_frame = frame_payload_len - 3; // -3 for CRC and tail byte.
+    let tail_byte_i = find_tail_byte_index(payload_len_this_frame as u8);
 
-    while latest_i_sent < payload_len {
-        let mut payload_to_send = if FD_MODE.load(Ordering::Acquire) {
-            &[0; DATA_FRAME_MAX_LEN_FD as usize][..]
+    bufs[active_frame][..2].clone_from_slice(&crc.value.to_le_bytes());
+    bufs[active_frame][2..frame_payload_len - 1]
+        .clone_from_slice(&payload[..frame_payload_len - 3]);
+    bufs[active_frame][tail_byte_i] = tail_byte.value();
+
+    can_send(
+        can,
+        can_id,
+        &bufs[active_frame],
+        frame_payload_len as u8,
+        fd_mode,
+    )?;
+
+    // println!("\n\nFirst frame");
+    // println!("PL this frame: {}", payload_len_this_frame);
+    // println!("Latest sent i: {}", -1);
+
+    let mut latest_i_sent = payload_len_this_frame - 1;
+    // println!("Payload: {:?}", bufs[active_frame]);
+
+    active_frame += 1;
+
+    // Populate subsequent frames.
+    while latest_i_sent < payload_len as usize - 1 {
+        let payload_i = latest_i_sent + 1;
+        if payload_i + frame_payload_len <= payload_len as usize {
+            // Not the last frame.
+            // println!("Middle frame");
+            payload_len_this_frame = frame_payload_len - 1;
+            component = TransferComponent::MultiMid(tail_byte.toggle);
         } else {
-            &[0; DATA_FRAME_MAX_LEN_LEGACY as usize][..]
-        };
-
-        let payload_to_send = if let TransferComponent::MultiEnd(_) = component {
-            let tail_byte = make_tail_byte(component, transfer_id);
-            payload_with_tail_byte[0..payload_len as usize].clone_from_slice(payload);
-            payload_with_tail_byte[payload_len as usize] = tail_byte;
-
-            payload_with_tail_byte
-        } else {
-            payload
-        };
-
-        can_send(can, can_id, payload_to_send, MAX_PAYLOAD_SIZE as u8)?;
-
-        match component {
-            TransferComponent::MultiStart => {
-                component = TransferComponent::MultiMid(false);
-            }
-            TransferComponent::MultiMid(toggle_prev) => {
-                component = TransferComponent::MultiMid(toggle_prev);
-                // todo: End if at end.
-            }
-            TransferComponent::MultiEnd(_) => break,
-            TransferComponent::SingleFrame => panic!("Single frame transfer; code logic error"),
+            // Last frame.
+            // println!("Last frame");
+            payload_len_this_frame = payload_len as usize - payload_i;
+            component = TransferComponent::MultiEnd(tail_byte.toggle);
         }
+        // println!("PL this frame: {}", payload_len_this_frame);
+        // println!("Latest sent i: {}", latest_i_sent);
 
-        latest_i_sent += 7; // 8 byte frame size, - 1 for each frame's tail byte.
+        tail_byte = make_tail_byte(component, transfer_id);
+
+        bufs[active_frame][0..payload_len_this_frame]
+            .clone_from_slice(&payload[payload_i..payload_i + payload_len_this_frame]);
+
+        let tail_byte_i = find_tail_byte_index(payload_len_this_frame as u8);
+        bufs[active_frame][tail_byte_i] = tail_byte.value();
+
+        // println!("Payload: {:?}", bufs[active_frame][..frame_payload_len]);
+
+        can_send(
+            can,
+            can_id,
+            &bufs[active_frame][..frame_payload_len],
+            frame_payload_len as u8,
+            fd_mode,
+        )?;
+
+        latest_i_sent += payload_len_this_frame; // 8 byte frame size, - 1 for each frame's tail byte.
+        active_frame += 1;
     }
+
     return Ok(());
 }
 
@@ -587,7 +656,14 @@ pub fn broadcast(
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
     if payload_len > (frame_payload_len - 1) as u16 {
-        return send_multiple_frames(can, payload, payload_len, can_id.value(), transfer_id);
+        return send_multiple_frames(
+            can,
+            payload,
+            payload_len,
+            can_id.value(),
+            transfer_id,
+            fd_mode,
+        );
     }
 
     let tail_byte = make_tail_byte(TransferComponent::SingleFrame, transfer_id);
@@ -598,7 +674,7 @@ pub fn broadcast(
     can_send(
         can,
         can_id.value(),
-        // &payload[0..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
+        // &payload[..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
         &payload,
         payload_len as u8,
         fd_mode,

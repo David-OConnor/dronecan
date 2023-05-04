@@ -16,6 +16,8 @@ pub const DATA_TYPE_ID_GLOBAL_TIME_SYNC: u16 = 4; // todo?
 pub const DATA_TYPE_ID_TRANSPORT_STATS: u16 = 4; // todo?
 pub const DATA_TYPE_ID_PANIC: u16 = 5; // todo?
 pub const DATA_TYPE_ID_RESTART: u16 = 5; // todo?
+pub const DATA_TYPE_ID_EXECUTE_OPCODE: u16 = 10;
+pub const DATA_TYPE_ID_GET_SET: u16 = 11;
 
 pub const DATA_TYPE_ID_MAGNETIC_FIELD_STRENGTH2: u16 = 1002;
 pub const DATA_TYPE_ID_RAW_IMU: u16 = 1_003;
@@ -24,6 +26,9 @@ pub const DATA_TYPE_ID_STATIC_PRESSURE: u16 = 1028;
 pub const DATA_TYPE_ID_STATIC_TEMPERATURE: u16 = 1029;
 pub const DATA_TYPE_ID_FIX2: u16 = 1_063;
 pub const DATA_TYPE_ID_GLOBAL_NAVIGATION_SOLUTION: u16 = 2_000;
+
+pub const DATA_TYPE_ID_CH_DATA: u16 = 2_103;
+pub const DATA_TYPE_ID_LINK_STATS: u16 = 2_104;
 
 pub static TRANSFER_ID_NODE_INFO: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_STATUS: AtomicUsize = AtomicUsize::new(0);
@@ -40,6 +45,8 @@ pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::new(0);
 
+pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
 
 pub const PAYLOAD_SIZE_NODE_INFO: usize = 49; // todo: hard-coded for name len of 8.
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
@@ -51,9 +58,10 @@ pub const PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2: usize = 7;
 pub const PAYLOAD_SIZE_RAW_IMU: usize = 47; // Does not include covariance.
 pub const PAYLOAD_SIZE_STATIC_PRESSURE: usize = 6;
 pub const PAYLOAD_SIZE_STATIC_TEMPERATURE: usize = 4;
-pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 69; // todo temp
+pub const PAYLOAD_SIZE_FIX2: usize = 50;
+pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 87;
 
-
+pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
 // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
 pub const DATA_TYPE_ID_ACK: u16 = 2_000;
@@ -74,7 +82,6 @@ static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
 
 use defmt::println;
-
 
 // todo t
 use fdcan::{
@@ -115,7 +122,7 @@ impl NodeStatus {
     pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_NODE_STATUS] {
         let mut result = [0; PAYLOAD_SIZE_NODE_STATUS];
 
-        result[0..4].clone_from_slice(&self.uptime_sec.to_le_bytes());
+        result[..4].clone_from_slice(&self.uptime_sec.to_le_bytes());
 
         // Health and mode. Submode is reserved by the spec for future use,
         // but is currently not used.
@@ -196,6 +203,62 @@ pub enum DataTypeKind {
     Message = 1,
 }
 
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
+pub struct GlobalNavSolution {
+    pub timestamp: u64,
+    pub longitude: f64,
+    pub latitude: f64,
+    pub height_ellipsoid: f32,
+    pub height_msl: f32,
+    pub height_agl: f32,
+    pub height_baro: f32,
+    pub qnh_hpa: Option<f32>,
+    pub orientation_xyzw: [f32; 4],
+    // (skipping pose covariance)
+    pub linear_velocity_body: [f32; 3],
+    pub angular_velocity_body: [f32; 3],
+    pub linear_acceleration_body: [f32; 3], // f16
+                                            // (skipping velocity covariance)
+}
+
+impl GlobalNavSolution {
+    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION] {
+        let mut result = [0; PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION];
+
+        result[..7].copy_from_slice(&(self.timestamp & 0b111_1111).to_le_bytes());
+        result[7..15].copy_from_slice(&self.longitude.to_le_bytes());
+        result[15..23].copy_from_slice(&self.latitude.to_le_bytes());
+
+        result[23..27].copy_from_slice(&self.height_ellipsoid.to_le_bytes());
+        result[27..31].copy_from_slice(&self.height_msl.to_le_bytes());
+        result[31..35].copy_from_slice(&self.height_agl.to_le_bytes());
+        result[35..39].copy_from_slice(&self.height_baro.to_le_bytes());
+
+        if let Some(q) = self.qnh_hpa {
+            result[39..41].copy_from_slice(&f16::from_f32(q).to_le_bytes());
+        }
+
+        result[41..45].copy_from_slice(&self.orientation_xyzw[0].to_le_bytes());
+        result[45..49].copy_from_slice(&self.orientation_xyzw[1].to_le_bytes());
+        result[49..53].copy_from_slice(&self.orientation_xyzw[2].to_le_bytes());
+        result[53..57].copy_from_slice(&self.orientation_xyzw[3].to_le_bytes());
+
+        result[57..61].copy_from_slice(&self.linear_velocity_body[0].to_le_bytes());
+        result[61..65].copy_from_slice(&self.linear_velocity_body[1].to_le_bytes());
+        result[65..69].copy_from_slice(&self.linear_velocity_body[2].to_le_bytes());
+
+        result[69..73].copy_from_slice(&self.angular_velocity_body[0].to_le_bytes());
+        result[73..77].copy_from_slice(&self.angular_velocity_body[1].to_le_bytes());
+        result[77..81].copy_from_slice(&self.angular_velocity_body[2].to_le_bytes());
+
+        result[81..83].copy_from_slice(&f16::from_f32(self.angular_velocity_body[0]).to_le_bytes());
+        result[83..85].copy_from_slice(&f16::from_f32(self.angular_velocity_body[1]).to_le_bytes());
+        result[85..87].copy_from_slice(&f16::from_f32(self.angular_velocity_body[1]).to_le_bytes());
+
+        result
+    }
+}
+
 /// Standard data type: uavcan.protocol.NodeStatus
 /// Must be broadcast at intervals between 2 and 1000ms. FC firmware should
 /// consider the node to be faulty if this is not received for 3s.
@@ -218,7 +281,7 @@ pub fn publish_node_status(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_STATUS as u8) + 1];
     let mut buf = unsafe { &mut BUF_NODE_STATUS };
 
-    buf[0..PAYLOAD_SIZE_NODE_STATUS].clone_from_slice(&status.to_bytes());
+    buf[..PAYLOAD_SIZE_NODE_STATUS].clone_from_slice(&status.to_bytes());
 
     let transfer_id = TRANSFER_ID_NODE_STATUS.fetch_add(1, Ordering::Relaxed);
 
@@ -259,7 +322,7 @@ pub fn publish_node_info(
         vendor_specific_status_code,
     };
 
-    buf[0..7].clone_from_slice(&status.to_bytes());
+    buf[..7].clone_from_slice(&status.to_bytes());
     buf[7..22].clone_from_slice(&software_version.to_bytes());
     buf[22..41].clone_from_slice(&hardware_version.to_bytes());
     buf[41..node_name.len()].clone_from_slice(node_name);
@@ -292,9 +355,9 @@ pub fn publish_transport_stats(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TRANSPORT_STATS as u8) + 1];
     let mut buf = unsafe { &mut BUF_TRANSPORT_STATS };
 
-    buf[0..6].clone_from_slice(&num_transmitted.to_le_bytes()[0..6]);
-    buf[6..12].clone_from_slice(&num_received.to_le_bytes()[0..6]);
-    buf[12..18].clone_from_slice(&num_errors.to_le_bytes()[0..6]);
+    buf[..6].clone_from_slice(&num_transmitted.to_le_bytes()[..6]);
+    buf[6..12].clone_from_slice(&num_received.to_le_bytes()[..6]);
+    buf[12..18].clone_from_slice(&num_errors.to_le_bytes()[..6]);
 
     let transfer_id = TRANSFER_ID_TRANSPORT_STATS.fetch_add(1, Ordering::Relaxed);
 
@@ -349,7 +412,7 @@ pub fn publish_time_sync(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TIME_SYNC as u8) + 1];
     let mut buf = unsafe { &mut BUF_TIME_SYNC };
 
-    buf[0..7].clone_from_slice(
+    buf[..7].clone_from_slice(
         &(previous_transmission_timestamp_usec & 0xff_ffff_ffff_ffff).to_le_bytes(),
     );
 
@@ -382,7 +445,7 @@ pub fn publish_static_pressure(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_PRESSURE as u8) + 1];
     let mut buf = unsafe { &mut BUF_PRESSURE };
 
-    buf[0..4].copy_from_slice(&pressure.to_le_bytes());
+    buf[..4].copy_from_slice(&pressure.to_le_bytes());
 
     let pressure_variance = f16::from_f32(pressure_variance);
     buf[4..6].copy_from_slice(&pressure_variance.to_le_bytes());
@@ -413,7 +476,7 @@ pub fn publish_temperature(
     let mut buf = unsafe { &mut BUF_TEMPERATURE };
 
     let temperature = f16::from_f32(temperature);
-    buf[0..2].clone_from_slice(&temperature.to_le_bytes());
+    buf[..2].clone_from_slice(&temperature.to_le_bytes());
 
     let temperature_variance = f16::from_f32(temperature_variance);
     buf[2..4].clone_from_slice(&temperature_variance.to_le_bytes());
@@ -436,7 +499,7 @@ pub fn publish_temperature(
 pub fn publish_mag_field_strength(
     can: &mut crate::Can_,
     sensor_id: u8,
-    magnetic_field: &[f32; 3], // f16. Gauss; X, Y, Z.
+    magnetic_field: &[f32; 3],          // f16. Gauss; X, Y, Z.
     _magnetic_field_covariance: &[f32], // f16
     fd_mode: bool,
     node_id: u8,
@@ -472,8 +535,8 @@ pub fn publish_mag_field_strength(
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/ahrs/1003.RawIMU.uavcan
 pub fn publish_raw_imu(
     can: &mut crate::Can_,
-    timestamp: u64, // 7-bytes
-    gyro: [f32; 3], // f16. x, y, z. rad/s
+    timestamp: u64,  // 7-bytes
+    gyro: [f32; 3],  // f16. x, y, z. rad/s
     accel: [f32; 3], // f16. x, y, z. rad/s
     // todo: integration?
     // todo: Covariances?
@@ -482,7 +545,7 @@ pub fn publish_raw_imu(
 ) -> Result<(), CanError> {
     let mut buf = unsafe { &mut BUF_RAW_IMU };
 
-    buf[0..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes());
+    buf[..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes());
     // integration interval: 0 here.
 
     buf[11..13].clone_from_slice(&f16::from_f32(gyro[0]).to_le_bytes());
@@ -510,43 +573,33 @@ pub fn publish_raw_imu(
         fd_mode,
     )
 }
-//
-// /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
-// pub fn publish_global_navigation_solution(
-//     can: &mut crate::Can_,
-//
-//     // todo: Covariances?
-//     fd_mode: bool,
-//     node_id: u8,
-// ) -> Result<(), CanError> {
-//     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
-//     let mut buf = unsafe { &mut BUF_MAGNETIC_FIELD_STRENGTH2 };
-//
-//     let field_x = f16::from_f32(magnetic_field[0]);
-//     let field_y = f16::from_f32(magnetic_field[1]);
-//     let field_z = f16::from_f32(magnetic_field[2]);
-//
-//     buf[0] = sensor_id;
-//     buf[1..3].clone_from_slice(&field_x.to_le_bytes());
-//     buf[3..5].clone_from_slice(&field_y.to_le_bytes());
-//     buf[5..7].clone_from_slice(&field_z.to_le_bytes());
-//
-//     // todo: Covariance as-required.
-//
-//     let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
-//
-//     broadcast(
-//         can,
-//         MsgPriority::Nominal,
-//         DATA_TYPE_ID_MAGNETIC_FIELD_STRENGTH2,
-//         node_id,
-//         transfer_id as u8,
-//         buf,
-//         PAYLOAD_SIZE_STATIC_MAGNETIC_FIELD_STRENGTH2 as u16,
-//         fd_mode,
-//     )
-// }
 
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
+pub fn publish_global_navigation_solution(
+    can: &mut crate::Can_,
+    data: &GlobalNavSolution,
+    // todo: Covariances?
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
+    let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
+
+    buf[..PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION].clone_from_slice(&data.to_bytes());
+
+    let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        MsgPriority::Nominal,
+        DATA_TYPE_ID_GLOBAL_NAVIGATION_SOLUTION,
+        node_id,
+        transfer_id as u8,
+        buf,
+        PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION as u16,
+        fd_mode,
+    )
+}
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
 pub fn handle_time_sync(
@@ -556,7 +609,7 @@ pub fn handle_time_sync(
     node_id: u8,
 ) -> Result<(), CanError> {
     let mut buf = [0; 8];
-    buf[0..7].clone_from_slice(payload);
+    buf[..7].clone_from_slice(payload);
     let previous_transmission_timestamp_usec = u64::from_le_bytes(buf);
 
     // todo: Handle.
@@ -572,7 +625,7 @@ pub fn handle_restart_request(
     node_id: u8,
 ) -> Result<(), CanError> {
     let mut num_bytes = [0; 8];
-    num_bytes[0..5].clone_from_slice(payload);
+    num_bytes[..5].clone_from_slice(payload);
     let magic_number = u64::from_le_bytes(num_bytes);
 
     let transfer_id = TRANSFER_ID_RESTART.fetch_add(1, Ordering::Relaxed);
