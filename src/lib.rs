@@ -14,9 +14,9 @@ use core::{
 };
 
 use fdcan::{
+    FdCan,
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id},
-    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
+    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
@@ -25,8 +25,10 @@ use defmt::println;
 
 pub mod gnss;
 pub mod messages;
+pub mod types;
 
 pub use messages::*;
+pub use types::*;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -178,23 +180,6 @@ impl MsgPriority {
             _ => Self::Other(val),
         }
     }
-}
-
-/// `uavcan.protocol.param.NumericValue`
-#[derive(Clone, Copy)]
-enum NumericValue {
-    Integer(i64),
-    Real(f32),
-}
-
-/// `uavcan.protocol.param.Value`
-#[derive(Clone, Copy)]
-enum Value<'a> {
-    Integer(i64),
-    Real(f32),
-    Boolean(bool), // u8 repr
-    /// Max length of 128 bytes.
-    String(&'a [u8]),
 }
 
 /// Code for computing CRC for multi-frame transfers:

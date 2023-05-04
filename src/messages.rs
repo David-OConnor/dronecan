@@ -48,7 +48,9 @@ pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::ne
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
 
-pub const PAYLOAD_SIZE_NODE_INFO: usize = 49; // todo: hard-coded for name len of 8.
+// This includes no name; add name len to it after. Assumes no hardware certificate of authority.
+pub const PAYLOAD_SIZE_NODE_INFO_WITHOUT_NAME: usize = 40;
+
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
 pub const PAYLOAD_SIZE_TIME_SYNC: usize = 7;
 pub const PAYLOAD_SIZE_TRANSPORT_STATS: usize = 18;
@@ -58,8 +60,10 @@ pub const PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2: usize = 7;
 pub const PAYLOAD_SIZE_RAW_IMU: usize = 47; // Does not include covariance.
 pub const PAYLOAD_SIZE_STATIC_PRESSURE: usize = 6;
 pub const PAYLOAD_SIZE_STATIC_TEMPERATURE: usize = 4;
-pub const PAYLOAD_SIZE_FIX2: usize = 50;
-pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 87;
+pub const PAYLOAD_SIZE_FIX2: usize = 51;
+
+// This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
+pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 88;
 
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
@@ -69,7 +73,7 @@ pub const DATA_TYPE_ID_ACK: u16 = 2_000;
 pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 
 // Static buffers, to ensure they live long enough through transmission. Note; This all include room for a tail byte,
-// based on payload len.
+// based on payload len. We also assume no `certificate_of_authority` for hardware size.
 static mut BUF_NODE_INFO: [u8; 64] = [0; 64];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
@@ -85,180 +89,16 @@ use defmt::println;
 
 // todo t
 use fdcan::{
+    FdCan,
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id},
-    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
+    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
-/// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NodeHealth {
-    Ok = 0,
-    Warning = 1,
-    Error = 2,
-    Critical = 3,
-}
+use crate::{
+    gnss::GlobalNavSolution,
+    types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion}
+};
 
-/// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NodeMode {
-    Operational = 0,
-    Initialization = 1,
-    Maintenance = 2,
-    SoftwareUpdate = 3,
-    Offline = 7,
-}
-
-/// Broadcast periodically, and sent as part of the Node Status message.
-pub struct NodeStatus {
-    pub uptime_sec: u32,
-    pub health: NodeHealth,
-    pub mode: NodeMode,
-    pub vendor_specific_status_code: u16,
-}
-
-impl NodeStatus {
-    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_NODE_STATUS] {
-        let mut result = [0; PAYLOAD_SIZE_NODE_STATUS];
-
-        result[..4].clone_from_slice(&self.uptime_sec.to_le_bytes());
-
-        // Health and mode. Submode is reserved by the spec for future use,
-        // but is currently not used.
-        result[4] = ((self.health as u8) << 6) | ((self.mode as u8) << 3);
-
-        result[5..7].clone_from_slice(&self.vendor_specific_status_code.to_le_bytes());
-
-        result
-    }
-}
-
-/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/HardwareVersion.uavcan
-/// Generic hardware version information.
-/// These values should remain unchanged for the device's lifetime.
-// pub struct HardwareVersion<'a> {
-pub struct HardwareVersion {
-    pub major: u8,
-    pub minor: u8,
-    /// Unique ID is a 128 bit long sequence that is globally unique for each node.
-    /// All zeros is not a valid UID.
-    /// If filled with zeros, assume that the value is undefined.
-    pub unique_id: [u8; 16],
-    /// Certificate of authenticity (COA) of the hardware, 255 bytes max.
-    // pub certificate_of_authority: &'a [u8],
-    pub certificate_of_authority: u8, // todo: Hardcoded as 1 byte.
-}
-
-impl HardwareVersion {
-    // pub fn to_bytes(&self, buf: &mut [u8]) {
-    pub fn to_bytes(&self) -> [u8; 19] {
-        let mut buf = [0; 19];
-
-        buf[0] = self.major;
-        buf[1] = self.minor;
-        buf[2..18].clone_from_slice(&self.unique_id);
-        // buf[18..self.certificate_of_authority.len() + 18]
-        //     .clone_frosm_slice(self.certificate_of_authority);
-        buf[18] = self.certificate_of_authority;
-
-        buf
-    }
-}
-
-/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/SoftwareVersion.uavcan
-/// Generic software version information.
-pub struct SoftwareVersion {
-    pub major: u8,
-    pub minor: u8,
-    ///This mask indicates which optional fields (see below) are set.
-    /// uint8 OPTIONAL_FIELD_FLAG_VCS_COMMIT = 1
-    ///uint8 OPTIONAL_FIELD_FLAG_IMAGE_CRC  = 2
-    pub optional_field_flags: u8,
-    /// VCS commit hash or revision number, e.g. git short commit hash. Optional.
-    pub vcs_commit: u32,
-    /// The value of an arbitrary hash function applied to the firmware image.
-    pub image_crc: u64,
-}
-
-impl SoftwareVersion {
-    pub fn to_bytes(&self) -> [u8; 15] {
-        let mut result = [0; 15];
-
-        result[0] = self.major;
-        result[1] = self.minor;
-        result[2] = self.optional_field_flags;
-        result[3..7].clone_from_slice(&self.vcs_commit.to_le_bytes());
-        result[7..15].clone_from_slice(&self.image_crc.to_le_bytes());
-
-        result
-    }
-}
-
-/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/DataTypeKind.uavcan
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum DataTypeKind {
-    Service = 0,
-    Message = 1,
-}
-
-/// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
-pub struct GlobalNavSolution {
-    pub timestamp: u64,
-    pub longitude: f64,
-    pub latitude: f64,
-    pub height_ellipsoid: f32,
-    pub height_msl: f32,
-    pub height_agl: f32,
-    pub height_baro: f32,
-    pub qnh_hpa: Option<f32>,
-    pub orientation_xyzw: [f32; 4],
-    // (skipping pose covariance)
-    pub linear_velocity_body: [f32; 3],
-    pub angular_velocity_body: [f32; 3],
-    pub linear_acceleration_body: [f32; 3], // f16
-                                            // (skipping velocity covariance)
-}
-
-impl GlobalNavSolution {
-    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION] {
-        let mut result = [0; PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION];
-
-        result[..7].copy_from_slice(&(self.timestamp & 0b111_1111).to_le_bytes());
-        result[7..15].copy_from_slice(&self.longitude.to_le_bytes());
-        result[15..23].copy_from_slice(&self.latitude.to_le_bytes());
-
-        result[23..27].copy_from_slice(&self.height_ellipsoid.to_le_bytes());
-        result[27..31].copy_from_slice(&self.height_msl.to_le_bytes());
-        result[31..35].copy_from_slice(&self.height_agl.to_le_bytes());
-        result[35..39].copy_from_slice(&self.height_baro.to_le_bytes());
-
-        if let Some(q) = self.qnh_hpa {
-            result[39..41].copy_from_slice(&f16::from_f32(q).to_le_bytes());
-        }
-
-        result[41..45].copy_from_slice(&self.orientation_xyzw[0].to_le_bytes());
-        result[45..49].copy_from_slice(&self.orientation_xyzw[1].to_le_bytes());
-        result[49..53].copy_from_slice(&self.orientation_xyzw[2].to_le_bytes());
-        result[53..57].copy_from_slice(&self.orientation_xyzw[3].to_le_bytes());
-
-        result[57..61].copy_from_slice(&self.linear_velocity_body[0].to_le_bytes());
-        result[61..65].copy_from_slice(&self.linear_velocity_body[1].to_le_bytes());
-        result[65..69].copy_from_slice(&self.linear_velocity_body[2].to_le_bytes());
-
-        result[69..73].copy_from_slice(&self.angular_velocity_body[0].to_le_bytes());
-        result[73..77].copy_from_slice(&self.angular_velocity_body[1].to_le_bytes());
-        result[77..81].copy_from_slice(&self.angular_velocity_body[2].to_le_bytes());
-
-        result[81..83].copy_from_slice(&f16::from_f32(self.angular_velocity_body[0]).to_le_bytes());
-        result[83..85].copy_from_slice(&f16::from_f32(self.angular_velocity_body[1]).to_le_bytes());
-        result[85..87].copy_from_slice(&f16::from_f32(self.angular_velocity_body[1]).to_le_bytes());
-
-        result
-    }
-}
-
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 /// Standard data type: uavcan.protocol.NodeStatus
 /// Must be broadcast at intervals between 2 and 1000ms. FC firmware should
 /// consider the node to be faulty if this is not received for 3s.
@@ -312,7 +152,6 @@ pub fn publish_node_info(
     node_id: u8,
 ) -> Result<(), CanError> {
     // todo: We have temporarily hardcoded this buffer fo a name len of 8.
-    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_INFO as u8) + 1];
     let mut buf = unsafe { &mut BUF_NODE_INFO };
 
     let status = NodeStatus {
@@ -324,10 +163,13 @@ pub fn publish_node_info(
 
     buf[..7].clone_from_slice(&status.to_bytes());
     buf[7..22].clone_from_slice(&software_version.to_bytes());
-    buf[22..41].clone_from_slice(&hardware_version.to_bytes());
-    buf[41..node_name.len()].clone_from_slice(node_name);
+    // Assumes no hardware cert of authority.
+    buf[22..40].clone_from_slice(&hardware_version.to_bytes());
+    buf[40..node_name.len()].clone_from_slice(node_name);
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
+
+    let len = (PAYLOAD_SIZE_NODE_INFO_WITHOUT_NAME + node_name.len()) as u16;
 
     broadcast(
         can,
@@ -336,11 +178,12 @@ pub fn publish_node_info(
         node_id,
         transfer_id as u8,
         buf,
-        PAYLOAD_SIZE_NODE_INFO as u16,
+        len,
         fd_mode,
     )
 }
 
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GetTransportStats.uavcan
 /// Standard data type: uavcan.protocol.GetTransportStats
 /// This is published in response to a requested.
 /// todo: What is the data type ID? 4 is in conflict.
@@ -352,12 +195,13 @@ pub fn publish_transport_stats(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_TRANSPORT_STATS as u8) + 1];
     let mut buf = unsafe { &mut BUF_TRANSPORT_STATS };
 
     buf[..6].clone_from_slice(&num_transmitted.to_le_bytes()[..6]);
     buf[6..12].clone_from_slice(&num_received.to_le_bytes()[..6]);
     buf[12..18].clone_from_slice(&num_errors.to_le_bytes()[..6]);
+
+    // Not used: Can interface stats.
 
     let transfer_id = TRANSFER_ID_TRANSPORT_STATS.fetch_add(1, Ordering::Relaxed);
 
@@ -442,7 +286,6 @@ pub fn publish_static_pressure(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_STATIC_PRESSURE as u8) + 1];
     let mut buf = unsafe { &mut BUF_PRESSURE };
 
     buf[..4].copy_from_slice(&pressure.to_le_bytes());
