@@ -6,7 +6,11 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{broadcast, Can, CanError, MsgPriority, types::{Value, NumericValue, GetSetResponse, PARAM_NAME_NODE_ID}};
+use crate::{
+    broadcast,
+    types::{GetSetResponse, NumericValue, Value, PARAM_NAME_NODE_ID},
+    Can, CanError, MsgPriority,
+};
 
 use half::f16;
 
@@ -70,6 +74,17 @@ pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 88;
 
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
+// This is a GetSet response. Very messy due to variable-size fields in the middle.
+// pads: 5 + 5 + 6 + 6 = 22
+// values (Integer + empty): 3 + 64 + 3 + 0 = 70
+// Default values (empty): 2 + 2 = 4
+// name: 14
+//
+// 110/8 = 13.75
+pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
+
+pub static TRANSFER_ID_GET_SET: AtomicUsize = AtomicUsize::new(0);
+
 // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
 pub const DATA_TYPE_ID_ACK: u16 = 2_000;
 
@@ -87,6 +102,8 @@ static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
+
+static mut BUF_CAN_ID_RESP: [u8; PAYLOAD_SIZE_CAN_ID_RESP] = [0; PAYLOAD_SIZE_CAN_ID_RESP];
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 0;
@@ -514,19 +531,26 @@ pub fn handle_restart_request(
 }
 
 /// Acknowledge that node ID was successfully changed.
-pub fn ack_can_id_change(can: &mut crate::Can_, fd_mode: bool, node_id: u8,) {
+pub fn ack_can_id_change(
+    can: &mut crate::Can_,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let mut buf = unsafe { &mut BUF_CAN_ID_RESP };
+
     let mut name = [0; 30]; // todo: Is this ok?
-
-    let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
-
     name[0..PARAM_NAME_NODE_ID.len()].copy_from_slice(crate::types::PARAM_NAME_NODE_ID);
+
     let resp = GetSetResponse {
-        value: Value::Integer(node_id_requested),
+        value: Value::Integer(node_id as i64),
         default_value: None,
         max_value: Some(NumericValue::Integer(NODE_ID_MAX_VALUE as i64)),
         min_value: Some(NumericValue::Integer(NODE_ID_MIN_VALUE as i64)),
         name,
+        name_len: PARAM_NAME_NODE_ID.len(),
     };
+
+    resp.to_bytes(buf);
 
     let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
 
@@ -536,10 +560,8 @@ pub fn ack_can_id_change(can: &mut crate::Can_, fd_mode: bool, node_id: u8,) {
         DATA_TYPE_ID_GET_SET,
         node_id,
         transfer_id as u8,
-        &mut resp.to_bytes(),
-        1, // todo!
+        buf,
+        PAYLOAD_SIZE_CAN_ID_RESP as u16,
         fd_mode,
-    )?;
-
-
+    )
 }

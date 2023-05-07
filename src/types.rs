@@ -123,13 +123,44 @@ pub enum Value<'a> {
     String(&'a [u8]),
 }
 
-impl Value {
+impl<'a> Value<'a> {
+    /// Modifies a bit array in place, with content from this value.
+    pub fn to_bits(&self, bits: &mut BitSlice<u8>, tag_start_i: usize) {
+        let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN; // bits
+
+        match self {
+            Self::Empty => {
+                bits[tag_start_i..val_start_i].store_le(0);
+            }
+            Self::Integer(v) => {
+                bits[tag_start_i..val_start_i].store_le(1);
+                bits[val_start_i..val_start_i + 64].store_le(*v);
+            }
+            Self::Real(v) => {
+                bits[tag_start_i..val_start_i].store_le(2);
+
+                // bitvec doesn't support floats.
+                let v_u32 = u32::from_le_bytes(v.to_le_bytes());
+                bits[val_start_i..val_start_i + 32].store_le(v_u32);
+            }
+            Self::Boolean(v) => {
+                bits[tag_start_i..val_start_i].store_le(3);
+                bits[val_start_i..val_start_i + 8].store_le(*v as u8);
+            }
+            Self::String(v) => {
+                bits[tag_start_i..val_start_i].store_le(4);
+                // todo
+                // bits[val_start_i..val_start_i + 64].store_le(v);
+            }
+        }
+    }
+
     /// Converts from a bit array, eg one of a larger message. Anchors using bit indexes
     /// passed as arguments.
-    pub fn from_bits(bits: &BitSlice<u8>, bit_start_i: usize) -> Result<Self, CanError> {
-        let val_start_i = bit_start_i + VALUE_TAG_BIT_LEN;
+    pub fn from_bits(bits: &BitSlice<u8>, tag_start_i: usize) -> Result<Self, CanError> {
+        let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN;
 
-        Ok(match bits[bit_start_i..val_start_i].load_le::<u8>() {
+        Ok(match bits[tag_start_i..val_start_i].load_le::<u8>() {
             0 => Self::Empty,
             1 => Self::Integer(bits[val_start_i + 8..val_start_i + 8 + 64].load_le::<i64>()),
             2 => {
@@ -137,14 +168,11 @@ impl Value {
                 let as_u32 = bits[val_start_i + 8..val_start_i + 8 + 32].load_le::<u32>();
                 Self::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
             }
-            3 => {
-                Self::Boolean(bits[val_start_i + 8..val_start_i + 8 + 8].load_le::<u8>() != 0)
-            }
+            3 => Self::Boolean(bits[val_start_i + 8..val_start_i + 8 + 8].load_le::<u8>() != 0),
             // todo: Impl string.
             // 4 => Self::String(bits[21..85].load_le::<i64>()),
             _ => return Err(CanError::PayloadData),
-        }
-        )
+        })
     }
 }
 
@@ -179,27 +207,27 @@ impl<'a> GetSetRequest<'a> {
         let value_start_i = 13;
         let value = Value::from_bits(bits, value_start_i)?;
 
-        let name_len_i = value_start_i + VALUE_TAG_BIT_LEN + match value {
-            Value::Empty => 0,
-            Value::Integer(_) => 64,
-            Value::Real(_) => 32,
-            Value::Boolean(_) => 8,
-            Value::String(_) => 0, // todo
-        };
+        let name_len_i = value_start_i
+            + VALUE_TAG_BIT_LEN
+            + match value {
+                Value::Empty => 0,
+                Value::Integer(_) => 64,
+                Value::Real(_) => 32,
+                Value::Boolean(_) => 8,
+                Value::String(_) => 0, // todo
+            };
 
         let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
 
         let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
 
         let mut name = [0; 30];
-        let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
-        name[0..name_len].copy_from_slice(&name_byte_slice);
 
-        Ok(Self {
-            index,
-            value,
-            name,
-        })
+        // todo: Figure out how to do this; check bitvec docs.
+        // let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8]>();
+        // name[0..name_len].copy_from_slice(&name_byte_slice);
+
+        Ok(Self { index, value, name })
     }
 }
 
@@ -214,30 +242,67 @@ pub struct GetSetResponse<'a> {
     pub min_value: Option<NumericValue>,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
     pub name: [u8; 30], // large enough for many uses
+    pub name_len: usize,
     // pub name: &'a [u8], // up to 92 bytes.
 }
 
 impl<'a> GetSetResponse<'a> {
-    pub fn to_bytes(buf: &mut [u8]) {
+    pub fn to_bytes(&self, buf: &mut [u8]) {
         let bits = buf.view_bits_mut::<Lsb0>();
 
-        // todo: Fill out.
+        let val_tag_start_i = 5; // bits.
+
+        self.value.to_bits(bits, val_tag_start_i);
+
+        // todo here for the optional fields with `from_bytes`.
+
+        // 5 is the pad between `value` and `default_value`.
+        let default_value_i = val_tag_start_i
+            + VALUE_TAG_BIT_LEN
+            + 5
+            + match self.value {
+                Value::Empty => 0,
+                Value::Integer(_) => 64,
+                Value::Real(_) => 32,
+                Value::Boolean(_) => 8,
+                Value::String(_) => 0, // todo
+            };
+
+        let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+
+        let max_value_size = 0; // todo
+
+        let min_value_size = 0; // todo
+                                // 2 is tag size of numeric value.
+        let min_value_i = max_value_i + 2 + max_value_size + 6;
+
+        // todo: Update once you include default values.
+        let name_len_i = min_value_i + 2 + min_value_size + 6;
+
+        // todo: Name section here is DRY with request.
+        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+
+        // todo: YOu need to figure out how to do this using bitvec.
+        // bits[name_start_i..name_start_i + self.name_len].store_le(self.name[0..self.name_len]);
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
         let bits = buf.view_bits::<Lsb0>();
 
-        let value_start_i = 5;
-        let value = Value::from_bits(bits, value_start_i)?;
+        let val_tag_start_i = 5;
+        let value = Value::from_bits(bits, val_tag_start_i)?;
 
-        // 5 is a pad in the spec.
-        let default_value_i = value_start_i + VALUE_TAG_BIT_LEN + 5 + match value {
-            Value::Empty => 0,
-            Value::Integer(_) => 64,
-            Value::Real(_) => 32,
-            Value::Boolean(_) => 8,
-            Value::String(_) => 0, // todo
-        };
+        // 5 is the pad between `value` and `default_value`.
+        let default_value_i = val_tag_start_i
+            + VALUE_TAG_BIT_LEN
+            + 5
+            + match value {
+                Value::Empty => 0,
+                Value::Integer(_) => 64,
+                Value::Real(_) => 32,
+                Value::Boolean(_) => 8,
+                Value::String(_) => 0, // todo
+            };
 
         // todo: Max, min and default values
         let default_value = None;
@@ -249,10 +314,10 @@ impl<'a> GetSetResponse<'a> {
 
         let min_value = None;
         let min_value_size = 0; // todo
-        // 2 is tag size of numeric value.
+                                // 2 is tag size of numeric value.
         let min_value_i = max_value_i + 2 + max_value_size + 6;
 
-         // todo: Update once you include default values.
+        // todo: Update once you include default values.
         let name_len_i = min_value_i + 2 + min_value_size + 6;
 
         // todo: Name section here is DRY with request.
@@ -261,8 +326,10 @@ impl<'a> GetSetResponse<'a> {
         let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
 
         let mut name = [0; 30];
-        let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
-        name[0..name_len].copy_from_slice(&name_byte_slice);
+
+        // todo! Figure out how to do this; check bitvec docs.
+        // let name_byte_slice = &bits[name_start_i..name_start_i + name_len].load_le::<[u8]>();
+        // name[0..name_len].copy_from_slice(&name_byte_slice);
 
         Ok(Self {
             value,
@@ -270,6 +337,7 @@ impl<'a> GetSetResponse<'a> {
             max_value,
             min_value,
             name,
+            name_len,
         })
     }
 }
