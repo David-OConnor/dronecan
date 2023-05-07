@@ -6,7 +6,7 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{broadcast, Can, CanError, MsgPriority};
+use crate::{broadcast, Can, CanError, MsgPriority, types::{Value, NumericValue, GetSetResponse, PARAM_NAME_NODE_ID}};
 
 use half::f16;
 
@@ -62,7 +62,8 @@ pub const PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2: usize = 7;
 pub const PAYLOAD_SIZE_RAW_IMU: usize = 47; // Does not include covariance.
 pub const PAYLOAD_SIZE_STATIC_PRESSURE: usize = 6;
 pub const PAYLOAD_SIZE_STATIC_TEMPERATURE: usize = 4;
-pub const PAYLOAD_SIZE_FIX2: usize = 51;
+// pub const PAYLOAD_SIZE_FIX2: usize = 51;
+pub const PAYLOAD_SIZE_FIX2: usize = 48; // todo?
 
 // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
 pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 88;
@@ -86,6 +87,10 @@ static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
+
+// Per DC spec.
+pub const NODE_ID_MIN_VALUE: u8 = 0;
+pub const NODE_ID_MAX_VALUE: u8 = 127;
 
 use defmt::println;
 
@@ -506,4 +511,35 @@ pub fn handle_restart_request(
     // cp.SCB.sys_reset();
 
     Ok(())
+}
+
+/// Acknowledge that node ID was successfully changed.
+pub fn ack_can_id_change(can: &mut crate::Can_, fd_mode: bool, node_id: u8,) {
+    let mut name = [0; 30]; // todo: Is this ok?
+
+    let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
+
+    name[0..PARAM_NAME_NODE_ID.len()].copy_from_slice(crate::types::PARAM_NAME_NODE_ID);
+    let resp = GetSetResponse {
+        value: Value::Integer(node_id_requested),
+        default_value: None,
+        max_value: Some(NumericValue::Integer(NODE_ID_MAX_VALUE as i64)),
+        min_value: Some(NumericValue::Integer(NODE_ID_MIN_VALUE as i64)),
+        name,
+    };
+
+    let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        MsgPriority::Low,
+        DATA_TYPE_ID_GET_SET,
+        node_id,
+        transfer_id as u8,
+        &mut resp.to_bytes(),
+        1, // todo!
+        fd_mode,
+    )?;
+
+
 }

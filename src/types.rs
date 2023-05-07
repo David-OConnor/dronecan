@@ -11,6 +11,12 @@ pub const PARAM_NAME_BIT_RATE: &'static [u8] = "uavcan.bit_rate".as_bytes();
 // Must be postfixed with full data type name, eg `uavcan.pubp-uavcan.protocol.NodeStatus`
 pub const PARAM_NAME_PUBLICATION_PERIOD: &'static str = "uavcan.pubp-";
 
+// Used to determine which enum (union) variant is used.
+// "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"
+const VALUE_TAG_BIT_LEN: usize = 3;
+// For use in `GetSet`
+const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
+
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -99,6 +105,7 @@ impl ExecuteOpcode {
 /// 2-bit tag.
 #[derive(Clone, Copy)]
 pub enum NumericValue {
+    Empty,
     Integer(i64),
     Real(f32),
 }
@@ -108,6 +115,7 @@ pub enum NumericValue {
 /// 3-bit tag with 5-bit prefix for alignment.
 #[derive(Clone, Copy)]
 pub enum Value<'a> {
+    Empty,
     Integer(i64),
     Real(f32),
     Boolean(bool), // u8 repr
@@ -115,110 +123,153 @@ pub enum Value<'a> {
     String(&'a [u8]),
 }
 
+impl Value {
+    /// Converts from a bit array, eg one of a larger message. Anchors using bit indexes
+    /// passed as arguments.
+    pub fn from_bits(bits: &BitSlice<u8>, bit_start_i: usize) -> Result<Self, CanError> {
+        let val_start_i = bit_start_i + VALUE_TAG_BIT_LEN;
+
+        Ok(match bits[bit_start_i..val_start_i].load_le::<u8>() {
+            0 => Self::Empty,
+            1 => Self::Integer(bits[val_start_i + 8..val_start_i + 8 + 64].load_le::<i64>()),
+            2 => {
+                // No support for floats?
+                let as_u32 = bits[val_start_i + 8..val_start_i + 8 + 32].load_le::<u32>();
+                Self::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
+            }
+            3 => {
+                Self::Boolean(bits[val_start_i + 8..val_start_i + 8 + 8].load_le::<u8>() != 0)
+            }
+            // todo: Impl string.
+            // 4 => Self::String(bits[21..85].load_le::<i64>()),
+            _ => return Err(CanError::PayloadData),
+        }
+        )
+    }
+}
+
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
-pub struct GetSet<'a> {
+pub struct GetSetRequest<'a> {
     pub index: u16, // 13 bits
     /// If set - parameter will be assigned this value, then the new value will be returned.
     /// If not set - current parameter value will be returned.
-    pub value1: Value<'a>,
+    pub value: Value<'a>,
     // pub name: &'a [u8], // up to 92 bytes.
+    /// Name of the parameter; always preferred over index if nonempty.
     pub name: [u8; 30], // large enough for many uses
-    /// For set requests, it should contain the actual parameter value after the set request was
-    /// executed. The objective is to let the client know if the value could not be updated, e.g.
-    /// due to its range violation, etc.
-    /// Empty value (and/or empty name) indicates that there is no such parameter.
-    pub value2: Value<'a>,
-    pub default_value: Option<Value<'a>>,
-    pub max_value: Option<NumericValue>,
-    pub min_value: Option<NumericValue>,
 }
 
-impl<'a> GetSet<'a> {
-    // pub fn to_bytes(buf: &[u8]) -> Self {
+impl<'a> GetSetRequest<'a> {
+    // pub fn to_bytes(buf: &mut [u8]) -> Self {
     //     let index
     //     Self {
     //         index,
     //         value,
     //         name,
-    //         value2,
-    //         default_value,
-    //         max_value,
-    //         min_value,
     //     }
     // }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
-        const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
         let bits = buf.view_bits::<Lsb0>();
 
         let index = bits[0..13].load_le::<u16>();
 
+        // `i` in this function is in bits, not bytes, as we use elsewhere.
+
         let value_start_i = 13;
+        let value = Value::from_bits(bits, value_start_i)?;
 
-        let value1 = match bits[value_start_i..value_start_i + 8].load_le::<u8>() {
-            0 => Value::Integer(bits[value_start_i + 8..value_start_i + 8 + 64].load_le::<i64>()),
-            1 => {
-                // No support for floats?
-                let as_u32 = bits[value_start_i + 8..value_start_i + 8 + 32].load_le::<u32>();
-                Value::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
-            }
-            2 => {
-                Value::Boolean(bits[value_start_i + 8..value_start_i + 8 + 8].load_le::<u8>() != 0)
-            }
-            // todo: Impl string.
-            // 3 => Value::String(bits[21..85].load_le::<i64>()),
-            _ => return Err(CanError::PayloadData),
-        };
-
-        let name_len_i = match value1 {
-            Value::Integer(_) => value_start_i + 8 + 64,
-            Value::Real(_) => value_start_i + 8 + 32,
-            Value::Boolean(_) => value_start_i + 8 + 8,
+        let name_len_i = value_start_i + VALUE_TAG_BIT_LEN + match value {
+            Value::Empty => 0,
+            Value::Integer(_) => 64,
+            Value::Real(_) => 32,
+            Value::Boolean(_) => 8,
             Value::String(_) => 0, // todo
         };
 
-        let name_len = bits[name_len_i..name_len_i + NAME_LEN_BIT_SIZE].load_le::<u8>() as usize;
-
         let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
 
-        // todo: COnvert name to a byte array or str.
-        // let name = bits[name_start_i..name_start_i + name_len];
-        let mut name = [0; 30]; // todo!
+        let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
 
-        // let name = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
+        let mut name = [0; 30];
+        let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
+        name[0..name_len].copy_from_slice(&name_byte_slice);
 
-        // Includes a `void5` spacer.
-        let value2_start_i = name_start_i + name_len + 5;
+        Ok(Self {
+            index,
+            value,
+            name,
+        })
+    }
+}
 
-        // todo: DRY. Put in a sep fn etc.
-        let value2 = match bits[value2_start_i..value2_start_i + 8].load_le::<u8>() {
-            0 => Value::Integer(bits[value2_start_i + 8..value2_start_i + 8 + 64].load_le::<i64>()),
-            1 => {
-                // No support for floats?
-                let as_u32 = bits[value2_start_i + 8..value2_start_i + 8 + 32].load_le::<u32>();
-                Value::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
-            }
-            2 => Value::Boolean(
-                bits[value2_start_i + 8..value2_start_i + 8 + 8].load_le::<u8>() != 0,
-            ),
-            // todo: Impl string.
-            // 3 => Value::String(bits[21..85].load_le::<i64>()),
-            _ => return Err(CanError::PayloadData),
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
+pub struct GetSetResponse<'a> {
+    /// For set requests, it should contain the actual parameter value after the set request was
+    /// executed. The objective is to let the client know if the value could not be updated, e.g.
+    /// due to its range violation, etc.
+    pub value: Value<'a>,
+    pub default_value: Option<Value<'a>>,
+    pub max_value: Option<NumericValue>,
+    pub min_value: Option<NumericValue>,
+    /// Empty name (and/or empty value) in response indicates that there is no such parameter.
+    pub name: [u8; 30], // large enough for many uses
+    // pub name: &'a [u8], // up to 92 bytes.
+}
+
+impl<'a> GetSetResponse<'a> {
+    pub fn to_bytes(buf: &mut [u8]) {
+        let bits = buf.view_bits_mut::<Lsb0>();
+
+        // todo: Fill out.
+    }
+
+    pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
+        let bits = buf.view_bits::<Lsb0>();
+
+        let value_start_i = 5;
+        let value = Value::from_bits(bits, value_start_i)?;
+
+        // 5 is a pad in the spec.
+        let default_value_i = value_start_i + VALUE_TAG_BIT_LEN + 5 + match value {
+            Value::Empty => 0,
+            Value::Integer(_) => 64,
+            Value::Real(_) => 32,
+            Value::Boolean(_) => 8,
+            Value::String(_) => 0, // todo
         };
 
         // todo: Max, min and default values
         let default_value = None;
+
+        let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+
         let max_value = None;
+        let max_value_size = 0; // todo
+
         let min_value = None;
+        let min_value_size = 0; // todo
+        // 2 is tag size of numeric value.
+        let min_value_i = max_value_i + 2 + max_value_size + 6;
+
+         // todo: Update once you include default values.
+        let name_len_i = min_value_i + 2 + min_value_size + 6;
+
+        // todo: Name section here is DRY with request.
+        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+
+        let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
+
+        let mut name = [0; 30];
+        let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8; 30]>();
+        name[0..name_len].copy_from_slice(&name_byte_slice);
 
         Ok(Self {
-            index,
-            value1,
-            name,
-            value2,
+            value,
             default_value,
             max_value,
             min_value,
+            name,
         })
     }
 }
