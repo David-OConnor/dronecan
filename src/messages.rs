@@ -8,7 +8,12 @@ use packed_struct::PackedStruct;
 
 use crate::{
     broadcast,
-    types::{GetSetResponse, NumericValue, Value, PARAM_NAME_NODE_ID},
+    gnss::GlobalNavSolution,
+    messages::{self},
+    types::{
+        self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
+        SoftwareVersion, Value, PARAM_NAME_NODE_ID,
+    },
     Can, CanError, MsgPriority,
 };
 
@@ -112,15 +117,15 @@ pub const NODE_ID_MAX_VALUE: u8 = 127;
 use defmt::println;
 
 // todo t
-use crate::{
-    gnss::GlobalNavSolution,
-    types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion},
-};
-use fdcan::{
-    frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id},
-    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
-};
+// use crate::{
+//     gnss::GlobalNavSolution,
+//     types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion},
+// };
+// use fdcan::{
+//     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
+//     id::{ExtendedId, Id},
+//     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
+// };
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 /// Standard data type: uavcan.protocol.NodeStatus
@@ -531,18 +536,34 @@ pub fn handle_restart_request(
 }
 
 /// Acknowledge that node ID was successfully changed.
+/// In firmware, only apply the change if this returns Ok, since it performs checks,
+/// as well as the value to set.
 pub fn ack_can_id_change(
     can: &mut crate::Can_,
+    node_id_requested: &Value,
     fd_mode: bool,
-    node_id: u8,
-) -> Result<(), CanError> {
+    node_id_current: u8,
+) -> Result<u8, CanError> {
+    let requested_val = match node_id_requested {
+        Value::Integer(node_id_requested) => *node_id_requested as u8,
+        _ => {
+            // todo: Reply back with something over CAN?
+            println!("Non-integer value requested as node id");
+            return Err(CanError::PayloadData);
+        }
+    };
+
+    if !(NODE_ID_MIN_VALUE < requested_val && requested_val < NODE_ID_MAX_VALUE) {
+        return Err(CanError::PayloadData);
+    }
+
     let mut buf = unsafe { &mut BUF_CAN_ID_RESP };
 
     let mut name = [0; 30]; // todo: Is this ok?
     name[0..PARAM_NAME_NODE_ID.len()].copy_from_slice(crate::types::PARAM_NAME_NODE_ID);
 
     let resp = GetSetResponse {
-        value: Value::Integer(node_id as i64),
+        value: *node_id_requested,
         default_value: None,
         max_value: Some(NumericValue::Integer(NODE_ID_MAX_VALUE as i64)),
         min_value: Some(NumericValue::Integer(NODE_ID_MIN_VALUE as i64)),
@@ -558,10 +579,12 @@ pub fn ack_can_id_change(
         can,
         MsgPriority::Low,
         DATA_TYPE_ID_GET_SET,
-        node_id,
+        node_id_current,
         transfer_id as u8,
         buf,
         PAYLOAD_SIZE_CAN_ID_RESP as u16,
         fd_mode,
-    )
+    )?;
+
+    Ok(requested_val)
 }
