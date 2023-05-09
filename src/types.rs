@@ -139,12 +139,11 @@ impl<'a> Value<'a> {
 
     /// Modifies a bit array in place, with content from this value.
     pub fn to_bits(&self, bits: &mut BitSlice<u8>, tag_start_i: usize) {
+        let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN; // bits
         bits[tag_start_i..val_start_i].store(self.tag());
 
-        let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN; // bits
-
         match self {
-            Self::Empty() => (),
+            Self::Empty => (),
             Self::Integer(v) => {
                 bits[val_start_i..val_start_i + 64].store_le(*v);
             }
@@ -161,7 +160,7 @@ impl<'a> Value<'a> {
                 bits[i..VALUE_STRING_LEN_SIZE].store_le(v.len());
                 i += VALUE_STRING_LEN_SIZE;
                 for char in *v {
-                    bits[i..i + 8].store_le(char);
+                    bits[i..i + 8].store_le(*char);
                     i += 8;
                 }
             }
@@ -173,7 +172,7 @@ impl<'a> Value<'a> {
     pub fn from_bits(
         bits: &BitSlice<u8>,
         tag_start_i: usize,
-        str_buf: &mut [u8],
+        str_buf: &'a mut [u8],
     ) -> Result<Self, CanError> {
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN;
 
@@ -195,7 +194,7 @@ impl<'a> Value<'a> {
                     return Err(CanError::PayloadData);
                 }
 
-                for char_i in 0..str_len {
+                for char_i in 0..str_len as usize {
                     str_buf[char_i] = bits[i..i + 8].load_le::<u8>();
                     i += 8;
                 }
@@ -237,7 +236,7 @@ impl<'a> GetSetRequest<'a> {
         // `i` in this function is in bits, not bytes, as we use elsewhere.
 
         let value_start_i = 13;
-        let value = Value::from_bits(bits, value_start_i)?;
+        let value = Value::from_bits(bits, value_start_i, &mut [])?; // todo: t str buf
 
         let name_len_i = value_start_i
             + VALUE_TAG_BIT_LEN
@@ -256,7 +255,7 @@ impl<'a> GetSetRequest<'a> {
 
         let mut name = [0; 20];
 
-        let mut i = val_start_i; // bits.
+        let mut i = value_start_i; // bits.
 
         i += VALUE_STRING_LEN_SIZE;
 
@@ -345,7 +344,7 @@ impl<'a> GetSetResponse<'a> {
         let bits = buf.view_bits::<Lsb0>();
 
         let val_tag_start_i = 5;
-        let value = Value::from_bits(bits, val_tag_start_i)?;
+        let value = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
 
         // 5 is the pad between `value` and `default_value`.
         let default_value_i = val_tag_start_i
@@ -382,7 +381,7 @@ impl<'a> GetSetResponse<'a> {
 
         let mut name = [0; 20];
 
-        let mut i = val_start_i; // bits.
+        let mut i = name_start_i; // bits.
 
         i += VALUE_STRING_LEN_SIZE;
 

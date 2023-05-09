@@ -559,8 +559,8 @@ pub fn ack_can_id_change(
 
     let mut buf = unsafe { &mut BUF_CAN_ID_RESP };
 
-    let mut name = [0; PARAM_NAME_NODE_ID.len()];
-    name.copy_from_slice(PARAM_NAME_NODE_ID);
+    let mut name = [0; 20]; // todo: Is this ok?
+    name[0..PARAM_NAME_NODE_ID.len()].copy_from_slice(crate::types::PARAM_NAME_NODE_ID);
 
     let resp = GetSetResponse {
         value: *node_id_requested,
