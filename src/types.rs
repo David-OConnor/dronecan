@@ -17,6 +17,9 @@ const VALUE_TAG_BIT_LEN: usize = 3;
 // For use in `GetSet`
 const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
 
+// Size in bits of the value string's size byte (leading byte)
+const VALUE_STRING_LEN_SIZE: usize = 8; // round_up(log2(128+1));
+
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -124,53 +127,81 @@ pub enum Value<'a> {
 }
 
 impl<'a> Value<'a> {
+    fn tag(&self) -> u8 {
+        match self {
+            Self::Empty => 0,
+            Self::Integer(_) => 1,
+            Self::Real(_) => 2,
+            Self::Boolean(_) => 3,
+            Self::String(_) => 4,
+        }
+    }
+
     /// Modifies a bit array in place, with content from this value.
     pub fn to_bits(&self, bits: &mut BitSlice<u8>, tag_start_i: usize) {
+        bits[tag_start_i..val_start_i].store(self.tag());
+
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN; // bits
 
         match self {
-            Self::Empty => {
-                bits[tag_start_i..val_start_i].store_le(0);
-            }
+            Self::Empty() => (),
             Self::Integer(v) => {
-                bits[tag_start_i..val_start_i].store_le(1);
                 bits[val_start_i..val_start_i + 64].store_le(*v);
             }
             Self::Real(v) => {
-                bits[tag_start_i..val_start_i].store_le(2);
-
                 // bitvec doesn't support floats.
                 let v_u32 = u32::from_le_bytes(v.to_le_bytes());
                 bits[val_start_i..val_start_i + 32].store_le(v_u32);
             }
             Self::Boolean(v) => {
-                bits[tag_start_i..val_start_i].store_le(3);
                 bits[val_start_i..val_start_i + 8].store_le(*v as u8);
             }
             Self::String(v) => {
-                bits[tag_start_i..val_start_i].store_le(4);
-                // todo
-                // bits[val_start_i..val_start_i + 64].store_le(v);
+                let mut i = val_start_i;
+                bits[i..VALUE_STRING_LEN_SIZE].store_le(v.len());
+                i += VALUE_STRING_LEN_SIZE;
+                for char in *v {
+                    bits[i..i + 8].store_le(char);
+                    i += 8;
+                }
             }
         }
     }
 
     /// Converts from a bit array, eg one of a larger message. Anchors using bit indexes
     /// passed as arguments.
-    pub fn from_bits(bits: &BitSlice<u8>, tag_start_i: usize) -> Result<Self, CanError> {
+    pub fn from_bits(
+        bits: &BitSlice<u8>,
+        tag_start_i: usize,
+        str_buf: &mut [u8],
+    ) -> Result<Self, CanError> {
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN;
 
         Ok(match bits[tag_start_i..val_start_i].load_le::<u8>() {
             0 => Self::Empty,
-            1 => Self::Integer(bits[val_start_i + 8..val_start_i + 8 + 64].load_le::<i64>()),
+            1 => Self::Integer(bits[val_start_i..val_start_i + 64].load_le::<i64>()),
             2 => {
-                // No support for floats?
-                let as_u32 = bits[val_start_i + 8..val_start_i + 8 + 32].load_le::<u32>();
+                // No support for floats in bitvec.
+                let as_u32 = bits[val_start_i..val_start_i + 32].load_le::<u32>();
                 Self::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
             }
-            3 => Self::Boolean(bits[val_start_i + 8..val_start_i + 8 + 8].load_le::<u8>() != 0),
-            // todo: Impl string.
-            // 4 => Self::String(bits[21..85].load_le::<i64>()),
+            3 => Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0),
+            4 => {
+                let mut i = val_start_i;
+                let str_len = bits[i..VALUE_STRING_LEN_SIZE].load_le::<u8>();
+                i += VALUE_STRING_LEN_SIZE;
+
+                if str_len as usize > str_buf.len() {
+                    return Err(CanError::PayloadData);
+                }
+
+                for char_i in 0..str_len {
+                    str_buf[char_i] = bits[i..i + 8].load_le::<u8>();
+                    i += 8;
+                }
+
+                Self::String(str_buf)
+            }
             _ => return Err(CanError::PayloadData),
         })
     }
@@ -184,7 +215,8 @@ pub struct GetSetRequest<'a> {
     pub value: Value<'a>,
     // pub name: &'a [u8], // up to 92 bytes.
     /// Name of the parameter; always preferred over index if nonempty.
-    pub name: [u8; 30], // large enough for many uses
+    pub name: [u8; 20], // large enough for many uses
+    pub name_len: usize,
 }
 
 impl<'a> GetSetRequest<'a> {
@@ -214,20 +246,35 @@ impl<'a> GetSetRequest<'a> {
                 Value::Integer(_) => 64,
                 Value::Real(_) => 32,
                 Value::Boolean(_) => 8,
-                Value::String(_) => 0, // todo
+                // todo: Hard-coded for node id; Breaks if the string len is different.
+                Value::String(_) => VALUE_STRING_LEN_SIZE + PARAM_NAME_NODE_ID.len() * 8,
             };
 
         let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
 
         let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
 
-        let mut name = [0; 30];
+        let mut name = [0; 20];
 
-        // todo: Figure out how to do this; check bitvec docs.
-        // let name_byte_slice = bits[name_start_i..name_start_i + name_len].load_le::<[u8]>();
-        // name[0..name_len].copy_from_slice(&name_byte_slice);
+        let mut i = val_start_i; // bits.
 
-        Ok(Self { index, value, name })
+        i += VALUE_STRING_LEN_SIZE;
+
+        if name_len as usize > name.len() {
+            return Err(CanError::PayloadData);
+        }
+
+        for char_i in 0..name_len {
+            name[char_i] = bits[i..i + 8].load_le::<u8>();
+            i += 8;
+        }
+
+        Ok(Self {
+            index,
+            value,
+            name,
+            name_len,
+        })
     }
 }
 
@@ -241,7 +288,7 @@ pub struct GetSetResponse<'a> {
     pub max_value: Option<NumericValue>,
     pub min_value: Option<NumericValue>,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
-    pub name: [u8; 30], // large enough for many uses
+    pub name: [u8; 20], // large enough for many uses
     pub name_len: usize,
     // pub name: &'a [u8], // up to 92 bytes.
 }
@@ -265,7 +312,8 @@ impl<'a> GetSetResponse<'a> {
                 Value::Integer(_) => 64,
                 Value::Real(_) => 32,
                 Value::Boolean(_) => 8,
-                Value::String(_) => 0, // todo
+                // todo: Hard-coded for node id; Breaks if the string len is different.
+                Value::String(_) => VALUE_STRING_LEN_SIZE + PARAM_NAME_NODE_ID.len() * 8,
             };
 
         let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
@@ -282,8 +330,15 @@ impl<'a> GetSetResponse<'a> {
         // todo: Name section here is DRY with request.
         let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
 
-        // todo: YOu need to figure out how to do this using bitvec.
-        // bits[name_start_i..name_start_i + self.name_len].store_le(self.name[0..self.name_len]);
+        // todo: DO this.
+
+        let mut i = name_start_i; // bits.
+        bits[i..NAME_LEN_BIT_SIZE].store_le(self.name_len);
+        i += NAME_LEN_BIT_SIZE;
+        for char in self.name {
+            bits[i..i + 8].store_le(char);
+            i += 8;
+        }
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
@@ -325,11 +380,20 @@ impl<'a> GetSetResponse<'a> {
 
         let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
 
-        let mut name = [0; 30];
+        let mut name = [0; 20];
 
-        // todo! Figure out how to do this; check bitvec docs.
-        // let name_byte_slice = &bits[name_start_i..name_start_i + name_len].load_le::<[u8]>();
-        // name[0..name_len].copy_from_slice(&name_byte_slice);
+        let mut i = val_start_i; // bits.
+
+        i += VALUE_STRING_LEN_SIZE;
+
+        if name_len as usize > name.len() {
+            return Err(CanError::PayloadData);
+        }
+
+        for char_i in 0..name_len {
+            name[char_i] = bits[i..i + 8].load_le::<u8>();
+            i += 8;
+        }
 
         Ok(Self {
             value,
