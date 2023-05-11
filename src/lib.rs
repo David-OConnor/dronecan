@@ -23,6 +23,7 @@ use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
 
 use defmt::println;
 
+pub crc;
 pub mod gnss;
 pub mod messages;
 pub mod types;
@@ -34,6 +35,8 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
+
+pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
 // Enough for global navigation solution, our current largest payload, + crc.
 // Static buffers for splitting up mult-frame payloads.
@@ -62,6 +65,8 @@ const CRC_POLY: u16 = 0x1021;
 const SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
 const SIGNATURE_MASK64: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
+use crate::crc::{TransferCrc, Signature};
+
 #[derive(Clone, Copy)]
 pub enum CanError {
     CanHardware,
@@ -78,14 +83,17 @@ pub struct ConfigCommon {
     pub node_id: u8,
     /// Ie, capable of 64-byte frame lens, vice 8.
     pub fd_mode: bool,
-    /// Kbps
+    /// Kbps. If less than 1_000, arbitration and data bit rate are the same.
+    /// If greater than 1_000, arbitration bit rate stays at 1_000 due to protocol limits
+    /// , while data bit rate is this value.
     pub can_bitrate: u16,
 }
 
 impl Default for ConfigCommon {
     fn default() -> Self {
         Self {
-            node_id: 0,
+            // Between 1 and 127.
+            node_id: 1,
             fd_mode: false,
             can_bitrate: 1_000,
         }
@@ -178,36 +186,6 @@ impl MsgPriority {
             5 => Self::Low,
             6 => Self::Slow,
             _ => Self::Other(val),
-        }
-    }
-}
-
-/// Code for computing CRC for multi-frame transfers:
-/// Adapted from https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
-struct TransferCrc {
-    pub value: u16,
-}
-
-impl TransferCrc {
-    pub fn new() -> Self {
-        Self { value: 0xffff }
-    }
-
-    fn add_byte(&mut self, byte: u8) {
-        self.value ^= (byte as u16) << 8;
-
-        for _ in 0..8 {
-            if (self.value & 0x8000) != 0 {
-                self.value = (self.value << 1) ^ CRC_POLY;
-            } else {
-                self.value = self.value << 1;
-            }
-        }
-    }
-
-    fn add_bytes(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.add_byte(*byte)
         }
     }
 }
@@ -329,44 +307,9 @@ impl TailByte {
         Self {
             transfer_id,
             toggle: toggle != 0,
-            end_of_transfer: toggle != 0,
+            end_of_transfer: end != 0,
             start_of_transfer: start != 0,
         }
-    }
-}
-
-/// Code for computing the data type signature for multi-frame transfers:
-/// Adapted from https://dronecan.github.io/Specification/3._Data_structure_description_language/
-struct Signature {
-    pub crc: u64,
-}
-
-impl Signature {
-    pub fn new(extend_from: Option<u64>) -> Self {
-        let crc = match extend_from {
-            Some(e) => (e & SIGNATURE_MASK64) ^ SIGNATURE_MASK64,
-            None => SIGNATURE_MASK64,
-        };
-
-        Self { crc }
-    }
-
-    fn add(&mut self, data_bytes: &[u8]) {
-        for byte in data_bytes {
-            self.crc ^= ((*byte as u64) << 56) & SIGNATURE_MASK64;
-
-            for _ in 0..8 {
-                if self.crc & (1 << 64) != 0 {
-                    self.crc = ((self.crc << 1) & SIGNATURE_MASK64) ^ SIGNATURE_POLY;
-                } else {
-                    self.crc <<= 1;
-                }
-            }
-        }
-    }
-
-    pub fn value(&self) -> u64 {
-        (self.crc & SIGNATURE_MASK64) ^ SIGNATURE_MASK64
     }
 }
 
@@ -377,35 +320,30 @@ impl Signature {
 const fn find_tail_byte_index(payload_len: u8) -> usize {
     // We take this comparatively verbose approach vice the loop below to be compatible
     // with const fns.
-    if payload_len <= 8 {
+
+    // Less than, not equals, since if it's len 8, for example, we need to leave room for the
+    // tail byte at index 7.
+    if payload_len < 8 {
         return 7;
     }
-    if payload_len <= 12 {
+    if payload_len < 12 {
         return 11;
     }
-    if payload_len <= 16 {
+    if payload_len < 16 {
         return 15;
     }
-    if payload_len <= 20 {
+    if payload_len < 20 {
         return 19;
     }
-    if payload_len <= 24 {
+    if payload_len < 24 {
         return 23;
     }
-    if payload_len <= 32 {
+    if payload_len < 32 {
         return 31;
     }
-    if payload_len <= 48 {
+    if payload_len < 48 {
         return 47;
     }
-
-    // const DATA_LENGTHS: [u8; 8] = [8, 12, 16, 20, 24, 32, 48, 64];
-    //
-    // for data_len in &DATA_LENGTHS {
-    //     if payload_len <= *data_len {
-    //         return *data_len as usize - 1;
-    //     }
-    // }
 
     63
 }
@@ -510,6 +448,7 @@ fn send_multiple_frames(
     can_id: u32,
     transfer_id: u8,
     fd_mode: bool,
+    data_type_signature: u64, // todo: type??
 ) -> Result<(), CanError> {
     let frame_payload_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD as usize
@@ -522,11 +461,8 @@ fn send_multiple_frames(
     // signature, in little-endian byte order. The diagram below illustrates the input of the
     // transfer CRC function"
 
-    // For info on the type signature, see https://dronecan.github.io/Specification/3._Data_structure_description_language/,
-    // `Signature` section.
-    let signature = Signature::new(None);
-    // signature.add(sig_bytes); // todo: What is the signature computed with??
-    crc.add_bytes(&signature.value().to_le_bytes());
+
+    crc.add_bytes(&data_type_signature.to_le_bytes());
     crc.add_bytes(payload);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
@@ -641,6 +577,18 @@ pub fn broadcast(
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
     if payload_len > (frame_payload_len - 1) as u16 {
+
+    // For info on the type signature, see https://dronecan.github.io/Specification/3._Data_structure_description_language/,
+    // `Signature` section.
+    // Explicit algorithm, as the docs here are wanting:
+    // https://github.com/dronecan/pydronecan/blob/master/dronecan/dsdl/parser.py#L309
+
+    let dsdl_signature = ;
+
+    let signature = Signature::new(None);
+    // signature.add(sig_bytes); // todo: What is the signature computed with??
+        // todo: You probably need a dedicated module for crc and signature.
+
         return send_multiple_frames(
             can,
             payload,
@@ -648,6 +596,7 @@ pub fn broadcast(
             can_id.value(),
             transfer_id,
             fd_mode,
+            data_type_signature,
         );
     }
 
@@ -656,12 +605,23 @@ pub fn broadcast(
 
     payload[tail_byte_i] = tail_byte.value();
 
+    // if message_type_id == messages::DATA_TYPE_ID_NODE_STATUS {
+    //     println!("Node status. tail i: {}, Tail: s{} e{} val{}",
+    //              tail_byte_i, tail_byte.start_of_transfer, tail_byte.end_of_transfer, tail_byte.value());
+    //
+    //     println!("PL: {:?}", payload);
+    // }
+
+    payload[tail_byte_i] = tail_byte.value();
+
     can_send(
         can,
         can_id.value(),
-        // &payload[..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
-        &payload,
-        payload_len as u8,
+        &payload[..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
+        // &payload,
+        // payload_len as u8,
+        // The frame data length here includes the tail byte
+        tail_byte_i as u8 + 1,
         fd_mode,
     )
 }

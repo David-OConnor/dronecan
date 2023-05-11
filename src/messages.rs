@@ -6,40 +6,86 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{
-    broadcast,
-    gnss::GlobalNavSolution,
-    messages::{self},
-    types::{
-        self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
-        SoftwareVersion, Value, PARAM_NAME_NODE_ID,
-    },
-    Can, CanError, MsgPriority,
-};
+use crate::{broadcast, gnss::{GnssAuxiliary, GlobalNavSolution}, messages::{self}, types::{
+    self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
+    SoftwareVersion, Value, PARAM_NAME_NODE_ID,
+}, Can, CanError, MsgPriority, get_tail_byte};
 
 use half::f16;
 
 use cortex_m;
 
-pub const DATA_TYPE_ID_GET_NODE_INFO: u16 = 1;
-pub const DATA_TYPE_ID_NODE_STATUS: u16 = 341;
-pub const DATA_TYPE_ID_GLOBAL_TIME_SYNC: u16 = 4; // todo?
-pub const DATA_TYPE_ID_TRANSPORT_STATS: u16 = 4; // todo?
-pub const DATA_TYPE_ID_PANIC: u16 = 5; // todo?
-pub const DATA_TYPE_ID_RESTART: u16 = 5; // todo?
-pub const DATA_TYPE_ID_EXECUTE_OPCODE: u16 = 10;
-pub const DATA_TYPE_ID_GET_SET: u16 = 11;
+#[repr(u16)]
+pub enum MsgType {
+    GetNodeInfo = 1,
+    GlobalTimeSync = 4,
+    // TransportStats = 4, // todo: Duplicate id?
+    // Panic = 5,
+    Restart = 5, // todo: Duplicate id?
+    ExecuteOpcode = 10,
+    GetSet = 11,
+    NodeStatus = 341,
+    MagneticFieldStrength2 = 1_002,
+    RawImu = 1_003,
+    RawAirData = 1_027,
+    StaticPressure = 1_028,
+    StaticTemperature = 1_029,
+    GnssAux = 1_061,
+    Fix2 = 1_063,
+    GlobalNavigationSolution = 2_000,
+    ChData = 2_103, // AnyLeaf custom for now
+    LinkStats = 2_104, // AnyLeaf custom for now.
+    SetConfig = 2_105, // Anyleaf custom for now.
+    // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
+    Ack = 2_106, // AnyLeaf custom for now.
+    // todo: Anyleaf config sizes?
+}
 
-pub const DATA_TYPE_ID_MAGNETIC_FIELD_STRENGTH2: u16 = 1002;
-pub const DATA_TYPE_ID_RAW_IMU: u16 = 1_003;
-pub const DATA_TYPE_ID_RAW_AIR_DATA: u16 = 1027;
-pub const DATA_TYPE_ID_STATIC_PRESSURE: u16 = 1028;
-pub const DATA_TYPE_ID_STATIC_TEMPERATURE: u16 = 1029;
-pub const DATA_TYPE_ID_FIX2: u16 = 1_063;
-pub const DATA_TYPE_ID_GLOBAL_NAVIGATION_SOLUTION: u16 = 2_000;
+// This is a GetSet response. Very messy due to variable-size fields in the middle.
+// pads: 5 + 5 + 6 + 6 = 22
+// values (Integer + empty): 3 + 64 + 3 + 0 = 70
+// Default values (empty): 2 + 2 = 4
+// name: 14
+//
+// 110/8 = 13.75
+pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
 
-pub const DATA_TYPE_ID_CH_DATA: u16 = 2_103;
-pub const DATA_TYPE_ID_LINK_STATS: u16 = 2_104;
+impl MsgType {
+    /// Get the payload size. Does not include padding for a tail byte.
+    pub fn payload_size(&self) -> u8 {
+        // todo: 0 values are ones we haven't implemented yet.
+        // todo: Handle when response has a diff payload size!
+        match self {
+            // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
+            Self::GetNodeInfo => 40,
+            Self::GlobalTimeSync => 7,
+            // Self::TransportStats => 18,
+            // Self::Panic => ,
+            Self::Restart => 5,
+            Self::ExecuteOpcode => 0,
+            Self::GetSet => 0,
+            Self::NodeStatus => 7,
+            Self::MagneticFieldStrength2 => 7,
+            Self::RawImu => 47,
+            Self::RawAirData => 0,
+            Self::StaticPressure => 6,
+            Self::StaticTemperature => 4,
+            Self::GnssAux => 16,
+            Self::Fix2 => 48,
+            // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
+            Self::GlobalNavigationSolution => 88,
+            Self::ChData => 0, // todo AnyLeaf custom for now
+            Self::LinkStats => 0, // todo  AnyLeaf custom for now.
+            Self::SetConfig => 0, // todo
+            Self::Ack => 0, // todo
+        }
+    }
+
+    /// Includes payload size, padded for a tail byte.
+    pub fn buf_size(&self) -> usize {
+        crate::find_tail_byte_index(self.payload_size()) + 1
+    }
+}
 
 pub static TRANSFER_ID_NODE_INFO: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_STATUS: AtomicUsize = AtomicUsize::new(0);
@@ -53,46 +99,17 @@ pub static TRANSFER_ID_RAW_IMU: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_AIR_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_STATIC_PRESSURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_GNSS_AUX: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::new(0);
 
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
 
-// This includes no name; add name len to it after. Assumes no hardware certificate of authority.
-pub const PAYLOAD_SIZE_NODE_INFO_WITHOUT_NAME: usize = 40;
-
-pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
-pub const PAYLOAD_SIZE_TIME_SYNC: usize = 7;
-pub const PAYLOAD_SIZE_TRANSPORT_STATS: usize = 18;
-pub const PAYLOAD_SIZE_RESTART: usize = 5;
-
-pub const PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2: usize = 7;
-pub const PAYLOAD_SIZE_RAW_IMU: usize = 47; // Does not include covariance.
-pub const PAYLOAD_SIZE_STATIC_PRESSURE: usize = 6;
-pub const PAYLOAD_SIZE_STATIC_TEMPERATURE: usize = 4;
-// pub const PAYLOAD_SIZE_FIX2: usize = 51;
-pub const PAYLOAD_SIZE_FIX2: usize = 48; // todo?
-
-// This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
-pub const PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION: usize = 88;
-
-pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
-
-// This is a GetSet response. Very messy due to variable-size fields in the middle.
-// pads: 5 + 5 + 6 + 6 = 22
-// values (Integer + empty): 3 + 64 + 3 + 0 = 70
-// Default values (empty): 2 + 2 = 4
-// name: 14
-//
-// 110/8 = 13.75
-pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
+// todo: Impl these Arudpilot-specific types:
+// https://github.com/dronecan/DSDL/tree/master/ardupilot/gnss
 
 pub static TRANSFER_ID_GET_SET: AtomicUsize = AtomicUsize::new(0);
-
-// Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
-pub const DATA_TYPE_ID_ACK: u16 = 2_000;
-
 pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 
 // Static buffers, to ensure they live long enough through transmission. Note; This all include room for a tail byte,
@@ -106,6 +123,7 @@ static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covarianc
 static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
+static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
 
 static mut BUF_CAN_ID_RESP: [u8; PAYLOAD_SIZE_CAN_ID_RESP] = [0; PAYLOAD_SIZE_CAN_ID_RESP];
@@ -469,6 +487,33 @@ pub fn publish_global_navigation_solution(
         transfer_id as u8,
         buf,
         PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION as u16,
+        fd_mode,
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/gnss/1061.Auxiliary.uavcan
+pub fn publish_gnss_aux(
+    can: &mut crate::Can_,
+    data: &GnssAuxiliary,
+    // todo: Covariances?
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
+    let mut buf = unsafe { &mut BUF_GNSS_AUX };
+
+    buf[..PAYLOAD_SIZE_GNSS_AUX].clone_from_slice(&data.to_bytes());
+
+    let transfer_id = TRANSFER_ID_GNSS_AUX.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        MsgPriority::Slow,
+        DATA_TYPE_ID_GNSS_AUX,
+        node_id,
+        transfer_id as u8,
+        buf,
+        PAYLOAD_SIZE_GNSS_AUX as u16,
         fd_mode,
     )
 }

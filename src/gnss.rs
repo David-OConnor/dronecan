@@ -1,6 +1,6 @@
 //! This module includes code related to the FIX2 Dronecan standard.
 
-use crate::PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION;
+use crate::messages::{PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION, PAYLOAD_SIZE_GNSS_AUX};
 use half::f16;
 use packed_struct::{prelude::*, PackedStruct};
 
@@ -195,3 +195,37 @@ pub struct GlobalNavSolution {
 //         result
 //     }
 // }
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/gnss/1061.Auxiliary.uavcan
+pub struct GnssAuxiliary {
+    // All dop values are f16s.
+    pub gdop: f32,
+    pub pdop: f32,
+    pub hdop: f32,
+    pub vdop: f32,
+    pub tdop: f32,
+    pub ndop: f32,
+    pub edop: f32,
+    pub sats_visible: u8, // 7 bits
+    pub sats_used: u8, // 6 bits
+}
+
+impl GnssAuxiliary {
+    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_GNSS_AUX] {
+        let mut result = [0; PAYLOAD_SIZE_GNSS_AUX];
+
+        result[0..2].copy_from_slice(&f16::from_f32(self.gdop).to_le_bytes());
+        result[2..4].copy_from_slice(&f16::from_f32(self.pdop).to_le_bytes());
+        result[4..6].copy_from_slice(&f16::from_f32(self.hdop).to_le_bytes());
+        result[6..8].copy_from_slice(&f16::from_f32(self.vdop).to_le_bytes());
+        result[8..10].copy_from_slice(&f16::from_f32(self.tdop).to_le_bytes());
+        result[10..12].copy_from_slice(&f16::from_f32(self.ndop).to_le_bytes());
+        result[12..14].copy_from_slice(&f16::from_f32(self.edop).to_le_bytes());
+
+        // todo: QC this, eg using Dronecan GUI.
+        result[15] = ((self.sats_visible & 0b111_1111) << 1) & (self.sats_used >> 7);
+        result[16] = (self.sats_used & 0b1_1111);
+
+        result
+    }
+}

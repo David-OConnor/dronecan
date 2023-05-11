@@ -472,3 +472,4 @@ pub enum DataTypeKind {
     Service = 0,
     Message = 1,
 }
+
