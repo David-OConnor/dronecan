@@ -1,6 +1,6 @@
 //! This module includes code related to the FIX2 Dronecan standard.
 
-use crate::messages::{PAYLOAD_SIZE_GLOBAL_NAVIGATION_SOLUTION, PAYLOAD_SIZE_GNSS_AUX};
+use crate::messages::MsgType;
 use half::f16;
 use packed_struct::{prelude::*, PackedStruct};
 
@@ -211,8 +211,8 @@ pub struct GnssAuxiliary {
 }
 
 impl GnssAuxiliary {
-    pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_GNSS_AUX] {
-        let mut result = [0; PAYLOAD_SIZE_GNSS_AUX];
+    pub fn to_bytes(&self) -> [u8; MsgType::GnssAux.buf_size()] {
+        let mut result = [0; MsgType::GnssAux.buf_size()];
 
         result[0..2].copy_from_slice(&f16::from_f32(self.gdop).to_le_bytes());
         result[2..4].copy_from_slice(&f16::from_f32(self.pdop).to_le_bytes());
@@ -224,7 +224,7 @@ impl GnssAuxiliary {
 
         // todo: QC this, eg using Dronecan GUI.
         result[15] = ((self.sats_visible & 0b111_1111) << 1) & (self.sats_used >> 7);
-        result[16] = (self.sats_used & 0b1_1111);
+        result[16] = self.sats_used & 0b1_1111;
 
         result
     }

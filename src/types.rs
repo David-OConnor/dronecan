@@ -2,7 +2,9 @@
 
 use bitvec::prelude::*;
 
-use crate::{CanError, PAYLOAD_SIZE_NODE_STATUS};
+use crate::{CanError, messages::PAYLOAD_SIZE_NODE_STATUS};
+
+
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
 pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
