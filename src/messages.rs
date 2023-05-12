@@ -119,9 +119,9 @@ impl MsgType {
             Self::StaticPressure => 6,
             Self::StaticTemperature => 4,
             Self::GnssAux => 16,
-            Self::Fix2 => 48,
+            Self::Fix2 => 51,
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
-            Self::GlobalNavigationSolution => 88,
+            Self::GlobalNavigationSolution => 88, // todo: QC this by checking the unpacked size!!
             Self::ChData => 38, // todo
             Self::LinkStats => 38, // todo
             Self::SetConfig => 20, // todo
@@ -608,6 +608,9 @@ pub fn publish_global_navigation_solution(
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
     let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
 
+    println!("UNPACKED SIZE FOR NAV SOL: {}. Modify MSG_TYPE.payload_size, and buf size as required with this \
+    / 8!", data.pack().unwrap().len());
+
     buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
 
     let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
@@ -667,10 +670,9 @@ pub fn publish_fix2(
 
     let m_type = MsgType::Fix2;
 
-    // buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
+    buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
 
-    // todo: T
-    buf[0..48].clone_from_slice(&[1; 48]);
+    buf[47] = 2; // todo: Why?
 
     let transfer_id = TRANSFER_ID_FIX2.fetch_add(1, Ordering::Relaxed);
 

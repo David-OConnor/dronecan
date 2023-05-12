@@ -33,41 +33,43 @@ impl TransferCrc {
         }
     }
 
-    pub fn add_payload(&mut self, payload: &[u8], payload_len: usize) {
-        for byte in payload {
-            self.add_byte(*byte)
+    pub fn add_payload(&mut self, payload: &[u8], payload_len: usize, frame_payload_len: usize) {
+        // println!("Init val: {}, Payload: {:?} len: {}", self.value, payload,  payload_len);
+
+        for i in 0..payload_len {
+            self.add_byte(payload[i]);
         }
 
         // It appears from experimenting, that we need to 0-pad to the length up to the tail byte.
-        let padded_len = crate::find_tail_byte_index(payload_len as u8);
-
-        println!("pl len: {}, padded len: {}", payload_len, padded_len);
+        // let padded_len = crate::find_tail_byte_index(payload_len as u8);
 
         // for pl len 16, total msg len 20, padded len = 19, add 3 bytes works.
         // (index=18 is the last byte pre final tail. This is 3 bytes past the
         // last data byte.)
 
-        // I think we're padding wrong for 8-byte frames and/or multi-frame xfer.
-        // Specifically, we don't use a tail-byte index of 64 here.
-        // We pad to *the last frame*'s 8, for example.
+        // We must 0-pad until just prior to the final tail byte. Undocumented AFAIK.
+        let mut bytes_left = payload_len as i16;
+        let mut i = 0;
+        let mut num_frames = 0;
 
-        // Let's examine a 48-frame payload being split into frames of len=8.
-        // Frame 1: bytes 0..5
-        // Frame 2: bytes 5..12
-        // Frame 3: bytes 12..19
-        // Frame 4: bytes 19..26
-        // Frame 5: bytes 26..33
-        // Frame 6: Bytes 33..40
-        // Frame 7: Bytes 40..47
-        // Frame 8: byte 47
-        // (An 8th frame is required; it will contain the first byte and  the CRC)
+        while bytes_left > 0 {
+            if i == 0 {
+                bytes_left -= 5;
+            } else {
+                bytes_left -= 7;
+            }
+            i += 1;
+            num_frames += 1;
+        }
 
-        // for pl len 48, total msg len 64, padded len = _, add _ bytes works.
-        // Padded len is
-        //  index =53 is the last byte pre final tail)
+        // println!("Num frames: {}, padding: {}", num_frames, -bytes_left);
+
+        let padding = -bytes_left;
+
+        // let last_frame_size = payload_len +
 
         // for _ in pl_len..padded_len {
-        for _ in 0..6 {
+        for _ in 0..padding {
             self.add_byte(0);
         }
     }

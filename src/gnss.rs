@@ -56,13 +56,15 @@ pub struct EcefPositionVelocity {
 #[derive(PackedStruct)]
 #[packed_struct(bit_numbering = "msb0", endian = "lsb")]
 pub struct FixDronecan {
-    #[packed_field(bytes = "0..7")]
+    // #[packed_field(bytes = "0..7")]
+    #[packed_field(bytes = "0..8")] // bug in packed struct
     pub timestamp: u64, // 56 bits
     #[packed_field(size_bytes = "7")]
     pub gnss_timestamp: u64, // 56 bits
     #[packed_field(size_bits = "3", ty = "enum")]
     pub gnss_time_standard: GnssTimeStandard, // 3 bits
-    // 13-bit pad todo!!
+    #[packed_field(size_bits = "13")]
+    pub pad: u16,
     #[packed_field(size_bytes = "1")]
     pub num_leap_seconds: u8, // 0 for unknown
     #[packed_field(size_bits = "37")]
@@ -74,9 +76,8 @@ pub struct FixDronecan {
     #[packed_field(size_bits = "27")]
     pub height_msl_mm: i32, // 27 bits
     #[packed_field(element_size_bytes = "4")]
-    // pub ned_velocity: [f32; 3],
     pub ned_velocity: [u32; 3], // todo: packed_struct currently doesn't support float.
-    #[packed_field(size_bits = 6)]
+    #[packed_field(size_bits = "6")]
     pub sats_used: u8, // 6 bits.
     #[packed_field(size_bits = "2", ty = "enum")]
     pub fix_status: FixStatus, // 2 bits.
@@ -94,13 +95,13 @@ pub struct FixDronecan {
     /// single bit.
     ///
     /// For len of 36, we get 5.2. So, 6-bits len field.
-    // pub covariance: [Option<f32>; 36], // todo: [f16; <=36?] // todo: Currently unused.
     #[packed_field(size_bits = "6")]
     pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
     #[packed_field(size_bytes = "2")]
-    // pub pdop: f32, // 16 bits
-    pub pdop: u16, // 16 bits  // todo: packed_struct currently doesn't support float.
-                   // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
+    pub pdop: u16, // 16 bits  // f16; packed_struct currently doesn't support float.
+   // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
+    #[packed_field(size_bits = "1")]
+    pub ecef_position_velocity: u8 // <= 1; Set to 0.
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
@@ -110,7 +111,8 @@ pub struct FixDronecan {
 pub struct GlobalNavSolution {
     // Note; Most of these are float fields; we use ints here due to limitations in
     // `packed_struct`.
-    #[packed_field(bytes = "0..7")]
+    // #[packed_field(bytes = "0..7")]
+    #[packed_field(bytes = "0..8")] // bug in packed struct
     pub timestamp: u64,
     #[packed_field(size_bytes = "8")]
     pub longitude: u64,
@@ -132,15 +134,15 @@ pub struct GlobalNavSolution {
     // We just use a 0 for this for the mandatory len; see notes in `Fix2`,
     // and chapter 3 of the dronecan spec.
     #[packed_field(size_bits = "6")]
-    pub pose_covariance: u8,
-    // (skipping pose covariance)
+    pub pose_covariance: u8, // <= 36; Set to 0.
     #[packed_field(element_size_bytes = "4")]
     pub linear_velocity_body: [u32; 3],
     #[packed_field(element_size_bytes = "4")]
     pub angular_velocity_body: [u32; 3],
     #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
-                                            // (skipping velocity covariance)
+    #[packed_field(size_bits = "6")]
+    pub velocity_covariance: u8 //<= 36; Set to 0.
 }
 //
 // impl GlobalNavSolution {

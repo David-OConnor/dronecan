@@ -453,7 +453,7 @@ fn send_multiple_frames(
     };
 
     let mut crc = TransferCrc::new(base_crc);
-    crc.add_payload(payload, payload_len as usize);
+    crc.add_payload(payload, payload_len as usize, frame_payload_len);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
     let bufs = unsafe { &mut MULTI_FRAME_BUFS_FD };
@@ -484,7 +484,7 @@ fn send_multiple_frames(
         fd_mode,
     )?;
 
-    println!("\nWHOle payload: {:?}", payload);
+    // println!("\nWHOle payload: {:?}", payload);
 
     // println!("\n\nFirst frame");
     // println!("PL this frame: {}", payload_len_this_frame);
