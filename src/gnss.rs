@@ -201,32 +201,32 @@ pub struct GlobalNavSolution {
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/gnss/1061.Auxiliary.uavcan
 pub struct GnssAuxiliary {
     // All dop values are f16s.
-    pub gdop: f32,
-    pub pdop: f32,
-    pub hdop: f32,
-    pub vdop: f32,
-    pub tdop: f32,
-    pub ndop: f32,
-    pub edop: f32,
+    pub gdop: f16,
+    pub pdop: f16,
+    pub hdop: f16,
+    pub vdop: f16,
+    pub tdop: f16,
+    pub ndop: f16,
+    pub edop: f16,
     pub sats_visible: u8, // 7 bits
     pub sats_used: u8, // 6 bits
 }
 
 impl GnssAuxiliary {
-    pub fn to_bytes(&self) -> [u8; MsgType::GnssAux.buf_size()] {
-        let mut result = [0; MsgType::GnssAux.buf_size()];
+    pub fn to_bytes(&self) -> [u8; MsgType::GnssAux.payload_size() as usize] {
+        let mut result = [0; MsgType::GnssAux.payload_size() as usize];
 
-        result[0..2].copy_from_slice(&f16::from_f32(self.gdop).to_le_bytes());
-        result[2..4].copy_from_slice(&f16::from_f32(self.pdop).to_le_bytes());
-        result[4..6].copy_from_slice(&f16::from_f32(self.hdop).to_le_bytes());
-        result[6..8].copy_from_slice(&f16::from_f32(self.vdop).to_le_bytes());
-        result[8..10].copy_from_slice(&f16::from_f32(self.tdop).to_le_bytes());
-        result[10..12].copy_from_slice(&f16::from_f32(self.ndop).to_le_bytes());
-        result[12..14].copy_from_slice(&f16::from_f32(self.edop).to_le_bytes());
+        result[0..2].copy_from_slice(&self.gdop.to_le_bytes());
+        result[2..4].copy_from_slice(&self.pdop.to_le_bytes());
+        result[4..6].copy_from_slice(&self.hdop.to_le_bytes());
+        result[6..8].copy_from_slice(&self.vdop.to_le_bytes());
+        result[8..10].copy_from_slice(&self.tdop.to_le_bytes());
+        result[10..12].copy_from_slice(&self.ndop.to_le_bytes());
+        result[12..14].copy_from_slice(&self.edop.to_le_bytes());
 
         // todo: QC this, eg using Dronecan GUI.
-        result[15] = ((self.sats_visible & 0b111_1111) << 1) & (self.sats_used >> 7);
-        result[16] = self.sats_used & 0b1_1111;
+        result[14] = ((self.sats_visible & 0b111_1111) << 1) & (self.sats_used >> 7);
+        result[15] = self.sats_used & 0b1_1111;
 
         result
     }
