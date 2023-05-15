@@ -416,9 +416,9 @@ pub struct HardwareVersion {
     /// All zeros is not a valid UID.
     /// If filled with zeros, assume that the value is undefined.
     pub unique_id: [u8; 16],
+    // We currently don't use certificate of authority.
     // /// Certificate of authenticity (COA) of the hardware, 255 bytes max.
     // pub certificate_of_authority: &'a [u8],
-    // pub certificate_of_authority: u8, // todo: Hardcoded as 1 byte.
 }
 
 impl HardwareVersion {
@@ -432,6 +432,7 @@ impl HardwareVersion {
         //     .clone_frosm_slice(self.certificate_of_authority);
         // buf[18] = self.certificate_of_authority;
 
+        // Make sure to handle the 7-bit name-size pad after this when composing into node info.
         buf
     }
 }

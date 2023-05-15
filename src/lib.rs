@@ -169,7 +169,7 @@ impl MsgPriority {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 #[repr(u8)]
 pub enum RequestResponse {
     Request = 1,
@@ -233,7 +233,7 @@ impl CanId {
 
         // todo: for cyphal, bit 25 is 1 if a service transfer.
 
-        // The `&` operations are to enforce the smaller-bit-count allowed than the `u8` datatype allows.
+        // The `&` operations are to enforce the smaller-bit-count allowed than the datatype allows.
 
         let mut frame_type_val = 0;
 
@@ -284,6 +284,7 @@ impl CanId {
             0 => match source_node_id {
                 0 => {
                     frame_type = FrameType::MessageAnon(0);
+                     type_id = ((val >> 8) & 0b11) as u16;
                 }
                 _ => {
                     type_id = (val >> 8) as u16;
@@ -298,6 +299,7 @@ impl CanId {
                         RequestResponse::Response
                     },
                 });
+                type_id = ((val >> 16) & 0xff) as u16;
             }
             _ => unreachable!(),
         }

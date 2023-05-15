@@ -4,6 +4,8 @@
 
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
+use bitvec::prelude::*;
+
 use packed_struct::PackedStruct;
 
 use crate::{
@@ -109,7 +111,7 @@ impl MsgType {
         match self {
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
             Self::GetNodeInfo => 40,
-            Self::NodeInfo => 48, // hard-coded for name len of 8.
+            Self::NodeInfo => 40, // We add a name to the buf as-required.
             Self::GlobalTimeSync => 7,
             Self::TransportStats => 18,
             Self::Panic => 7, // todo?
@@ -222,7 +224,9 @@ pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 // Static buffers, to ensure they live long enough through transmission. Note; This all include room for a tail byte,
 // based on payload len. We also assume no `certificate_of_authority` for hardware size.
 // static mut BUF_NODE_INFO: [u8; 64] = [0; MsgType::GetNodeInfo.buf_size()]; // todo: This approach would be better, but not working.
-static mut BUF_NODE_INFO: [u8; 48] = [0; 48];
+
+// This node info buffer is padded to accomodate a 20-character name.
+static mut BUF_NODE_INFO: [u8; 60] = [0; 60];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
@@ -243,6 +247,7 @@ pub const NODE_ID_MAX_VALUE: u8 = 127;
 
 use crate::gnss::FixDronecan;
 use defmt::println;
+use crate::FrameType::Message;
 
 // todo t
 // use crate::{
@@ -311,9 +316,11 @@ pub fn publish_node_info(
     requester_node_id: u8,
 ) -> Result<(), CanError> {
     let m_type = MsgType::NodeInfo;
-
-    // todo: We have temporarily hardcoded this buffer fo a name len of 8.
     let mut buf = unsafe { &mut BUF_NODE_INFO };
+
+    if node_name.len() > buf.len() - MsgType::NodeInfo.payload_size() as usize {
+        return Err(CanError::PayloadData);
+    }
 
     let status = NodeStatus {
         uptime_sec,
@@ -322,11 +329,24 @@ pub fn publish_node_info(
         vendor_specific_status_code,
     };
 
+    // todo: NodeInfo struct to keep things consistent?
+
     buf[..7].clone_from_slice(&status.to_bytes());
+
+    let bits = buf.view_bits_mut::<Lsb0>();
+
+
+
+    // We have an alignment grenade in the middle of this struct due to the trailing 7-bit `name` field
+    // in Hardware version.
+
+    bits[].store_le(v_u32);
+
     buf[7..22].clone_from_slice(&software_version.to_bytes());
-    // Assumes no hardware cert of authority.
+    // Assumes no hardware cert of authority; includes a 7-bit field for it in serialization.
+
     buf[22..40].clone_from_slice(&hardware_version.to_bytes());
-    buf[40..node_name.len()].clone_from_slice(node_name);
+    buf[40..40 + node_name.len()].clone_from_slice(node_name);
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
@@ -335,6 +355,10 @@ pub fn publish_node_info(
         req_or_resp: RequestResponse::Response,
     });
 
+    // todo: I believe our name is currently cut off; may need to pass len manually to `broadcast`,
+    // since the payload_size() doesn't include it.
+
+    println!("Broadcasting node info");
     broadcast(
         can,
         frame_type,
