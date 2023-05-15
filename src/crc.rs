@@ -75,7 +75,6 @@ impl TransferCrc {
     }
 }
 
-
 /// Code for computing the data type signature for multi-frame transfers:
 /// Adapted from https://dronecan.github.io/Specification/3._Data_structure_description_language/
 ///

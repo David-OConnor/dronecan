@@ -6,10 +6,16 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{broadcast, gnss::{GnssAuxiliary, GlobalNavSolution}, messages::{self}, types::{
-    self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
-    SoftwareVersion, Value, PARAM_NAME_NODE_ID,
-}, Can, CanError, MsgPriority, get_tail_byte};
+use crate::{
+    broadcast, get_tail_byte,
+    gnss::{GlobalNavSolution, GnssAuxiliary},
+    messages::{self},
+    types::{
+        self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
+        SoftwareVersion, Value, PARAM_NAME_NODE_ID,
+    },
+    Can, CanError, FrameType, MsgPriority, RequestResponse, ServiceData,
+};
 
 use half::f16;
 
@@ -36,7 +42,7 @@ pub enum MsgType {
     GnssAux,
     Fix2,
     GlobalNavigationSolution,
-    ChData, // AnyLeaf custom for now
+    ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
     SetConfig, // Anyleaf custom for now.
     // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
@@ -47,17 +53,16 @@ pub enum MsgType {
     ConfigRx,
 }
 
-
 impl MsgType {
     /// Get the data type id.
-    pub fn id(&self) -> u16 {
+    pub const fn id(&self) -> u16 {
         match self {
             Self::GetNodeInfo => 1,
             Self::NodeInfo => 1,
             Self::GlobalTimeSync => 4,
             Self::TransportStats => 4, // todo: Duplicate id?
             Self::Panic => 5,
-            Self::Restart => 5, // todo: Duplicate id?
+            Self::Restart => 5,     // todo: Duplicate id?
             Self::RestartResp => 5, // todo: Duplicate id?
             Self::ExecuteOpcode => 10,
             Self::GetSet => 11,
@@ -70,7 +75,7 @@ impl MsgType {
             Self::GnssAux => 1_061,
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
-            Self::ChData => 3_103, // AnyLeaf custom for now
+            Self::ChData => 3_103,    // AnyLeaf custom for now
             Self::LinkStats => 3_104, // AnyLeaf custom for now.
             Self::SetConfig => 3_105, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
@@ -122,13 +127,13 @@ impl MsgType {
             Self::Fix2 => 51,
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88, // todo: QC this by checking the unpacked size!!
-            Self::ChData => 38, // todo
-            Self::LinkStats => 38, // todo
-            Self::SetConfig => 20, // todo
-            Self::Ack => 20, // todo
+            Self::ChData => 38,                   // todo
+            Self::LinkStats => 38,                // todo
+            Self::SetConfig => 20,                // todo
+            Self::Ack => 20,                      // todo
             Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 9,
-            Self::ConfigRxGet => 0, // todo
+            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 10,
+            Self::ConfigRxGet => 0,                                 // todo
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4, // todo
         }
     }
@@ -170,7 +175,7 @@ impl MsgType {
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => 0,
             Self::ConfigRxGet => 0,
-            Self::ConfigRx =>0,
+            Self::ConfigRx => 0,
         }
     }
 }
@@ -236,8 +241,8 @@ static mut BUF_CAN_ID_RESP: [u8; PAYLOAD_SIZE_CAN_ID_RESP] = [0; PAYLOAD_SIZE_CA
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use defmt::println;
 use crate::gnss::FixDronecan;
+use defmt::println;
 
 // todo t
 // use crate::{
@@ -281,13 +286,11 @@ pub fn publish_node_status(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Slow,
-        // DATA_TYPE_ID_NODE_STATUS,
         node_id,
         transfer_id as u8,
         buf,
-        // PAYLOAD_SIZE_NODE_STATUS as u16,
         fd_mode,
     )
 }
@@ -305,6 +308,7 @@ pub fn publish_node_info(
     node_name: &[u8],
     fd_mode: bool,
     node_id: u8,
+    requester_node_id: u8,
 ) -> Result<(), CanError> {
     let m_type = MsgType::NodeInfo;
 
@@ -326,17 +330,18 @@ pub fn publish_node_info(
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
-    // let len = (PAYLOAD_SIZE_NODE_INFO_WITHOUT_NAME + node_name.len()) as u16;
+    let frame_type = FrameType::Service(ServiceData {
+        dest_node_id: requester_node_id,
+        req_or_resp: RequestResponse::Response,
+    });
 
     broadcast(
         can,
+        frame_type,
         m_type,
-        // MsgPriority::Slow,
-        // DATA_TYPE_ID_GET_NODE_INFO,
         node_id,
         transfer_id as u8,
         buf,
-        // len,
         fd_mode,
     )
 }
@@ -367,13 +372,11 @@ pub fn publish_transport_stats(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Slow,
-        // DATA_TYPE_ID_TRANSPORT_STATS,
         node_id,
         transfer_id as u8,
         buf,
-        // PAYLOAD_SIZE_TRANSPORT_STATS as u16,
         fd_mode,
     )
 }
@@ -399,13 +402,11 @@ pub fn publish_panic(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Slow,
-        // DATA_TYPE_ID_PANIC,
         node_id,
         transfer_id as u8,
         reason_text,
-        // reason_text.len() as u16,
         fd_mode,
     )
 }
@@ -429,13 +430,11 @@ pub fn publish_time_sync(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Low,
-        // DATA_TYPE_ID_GLOBAL_TIME_SYNC,
         node_id,
         transfer_id as u8,
         buf,
-        // PAYLOAD_SIZE_TIME_SYNC as u16,
         fd_mode,
     )?;
 
@@ -465,13 +464,11 @@ pub fn publish_static_pressure(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Slow,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -498,13 +495,11 @@ pub fn publish_temperature(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Nominal,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -538,13 +533,11 @@ pub fn publish_mag_field_strength(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Nominal,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -583,13 +576,11 @@ pub fn publish_raw_imu(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::High,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -602,7 +593,6 @@ pub fn publish_global_navigation_solution(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-
     let m_type = MsgType::GlobalNavigationSolution;
 
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
@@ -617,13 +607,11 @@ pub fn publish_global_navigation_solution(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Nominal,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -647,13 +635,11 @@ pub fn publish_gnss_aux(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Slow,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         buf,
-        // m_type.payload_size() as u16,
         fd_mode,
     )
 }
@@ -678,6 +664,7 @@ pub fn publish_fix2(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
         node_id,
         transfer_id as u8,
@@ -708,6 +695,7 @@ pub fn handle_restart_request(
     payload: &[u8],
     fd_mode: bool,
     node_id: u8,
+    requester_node_id: u8,
 ) -> Result<(), CanError> {
     let m_type = MsgType::RestartResp;
 
@@ -720,25 +708,26 @@ pub fn handle_restart_request(
     if magic_number != 0xAC_CE55_1B1E {
         broadcast(
             can,
+            FrameType::Message,
             m_type,
-            // m_type,
-            // MsgPriority::Low,
-            // DATA_TYPE_ID_RESTART,
             node_id,
             transfer_id as u8,
             &mut [0], // ie false; error
-            // 1,
             fd_mode,
         )?;
 
         return Err(CanError::PayloadData);
     }
 
+    let frame_type = FrameType::Service(ServiceData {
+        dest_node_id: requester_node_id,
+        req_or_resp: RequestResponse::Response,
+    });
+
     broadcast(
         can,
+        frame_type,
         m_type,
-        // MsgPriority::Low,
-        // m_type as u16,
         node_id,
         transfer_id as u8,
         &mut [1], // ie true; success
@@ -797,13 +786,11 @@ pub fn ack_can_id_change(
 
     broadcast(
         can,
+        FrameType::Message,
         m_type,
-        // MsgPriority::Low,
-        // DATA_TYPE_ID_GET_SET,
         node_id_current,
         transfer_id as u8,
         buf,
-        // PAYLOAD_SIZE_CAN_ID_RESP as u16,
         fd_mode,
     )?;
 

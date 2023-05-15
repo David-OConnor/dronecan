@@ -99,9 +99,9 @@ pub struct FixDronecan {
     pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
     #[packed_field(size_bytes = "2")]
     pub pdop: u16, // 16 bits  // f16; packed_struct currently doesn't support float.
-   // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
+    // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
     #[packed_field(size_bits = "1")]
-    pub ecef_position_velocity: u8 // <= 1; Set to 0.
+    pub ecef_position_velocity: u8, // <= 1; Set to 0.
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
@@ -142,7 +142,7 @@ pub struct GlobalNavSolution {
     #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
     #[packed_field(size_bits = "6")]
-    pub velocity_covariance: u8 //<= 36; Set to 0.
+    pub velocity_covariance: u8, //<= 36; Set to 0.
 }
 //
 // impl GlobalNavSolution {
@@ -209,7 +209,7 @@ pub struct GnssAuxiliary {
     pub ndop: f16,
     pub edop: f16,
     pub sats_visible: u8, // 7 bits
-    pub sats_used: u8, // 6 bits
+    pub sats_used: u8,    // 6 bits
 }
 
 impl GnssAuxiliary {

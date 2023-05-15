@@ -36,21 +36,6 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
 
-// Enough for global navigation solution, our current largest payload, + crc.
-// Static buffers for splitting up mult-frame payloads.
-// static mut MULTI_FRAME_BUFS_LEGACY: [[u8; 8]; 10] = [
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-//     [0; 8],
-// ];
-
 static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
     [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64],
 ];
@@ -59,7 +44,7 @@ static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 
-use crate::crc::{TransferCrc, Signature};
+use crate::crc::{Signature, TransferCrc};
 
 #[derive(Clone, Copy)]
 pub enum CanError {
@@ -184,6 +169,26 @@ impl MsgPriority {
     }
 }
 
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum RequestResponse {
+    Request = 1,
+    Response = 0,
+}
+
+/// Data present in services, but not messages.
+pub struct ServiceData {
+    pub dest_node_id: u8, // 7 bits
+    pub req_or_resp: RequestResponse,
+}
+
+/// Differentiates between messages and services
+pub enum FrameType {
+    Message,
+    MessageAnon(u16), // Inner: the 12-bit discriminator
+    Service(ServiceData),
+}
+
 /// Construct a CAN ID. See DroneCAN Spec, CAN bus transport layer doc, "ID field" section.
 /// https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
 /// "DroneCAN uses only CAN 2.0B frame format (29-bit identifiers).
@@ -201,21 +206,22 @@ pub struct CanId {
     // In multi-frame transfers, the value of the priority field must be identical for all frames of the transfer.
     // (We use the enum which constrains to Cyphal's values).
     pub priority: MsgPriority,
-    // Valid values of message type ID range from 0 to 65535, inclusively.
-    // Valid values of message type ID range for anonymous message transfers range from 0 to 3, inclusively.
-    // This limitation is due to the fact that only 2 lower bits of the message type ID are available in this case.
-    pub message_type_id: u16, // Valid values of Node ID range from 1 to 127, inclusively.
+    /// Valid values of message type ID range from 0 to 65535, inclusively.
+    /// Valid values of message type ID range for anonymous message transfers range from 0 to 3, inclusively.
+    /// This limitation is due to the fact that only 2 lower bits of the message type ID are available in this case.\
+    /// Note: This is `service_type_id` for services.
+    pub type_id: u16, // Valid values of Node ID range from 1 to 127, inclusively.
     // Note that Node ID is represented by a 7-bit unsigned integer value and that zero is reserved,
     // to represent either an unknown node or all nodes, depending on the context.
     pub source_node_id: u8,
-    pub service: bool,
+    pub frame_type: FrameType,
 }
 
 impl CanId {
     pub fn value(&self) -> u32 {
         let on_cyphal = USING_CYPHAL.load(Ordering::Acquire);
 
-        let mut message_type_id = self.message_type_id;
+        let mut message_type_id = self.type_id;
         // Cyphal restricts message id to 13 bits.
         let (priority_bits, priority_shift) = if on_cyphal {
             message_type_id = message_type_id & 0b1_1111_1111_1111;
@@ -229,10 +235,31 @@ impl CanId {
 
         // The `&` operations are to enforce the smaller-bit-count allowed than the `u8` datatype allows.
 
+        let mut frame_type_val = 0;
+
+        if let FrameType::Service(_) = self.frame_type {
+            frame_type_val = 1;
+        }
+
         let mut result = (priority_bits << priority_shift)
-            | ((self.message_type_id as u32) << 8)
-            | ((self.service as u32) << 7)
+            | (frame_type_val << 7)
             | ((self.source_node_id & 0b111_1111) as u32);
+
+        // The middle 16 bits vary depending on frame type.
+        match &self.frame_type {
+            FrameType::Message => {
+                result |= (self.type_id as u32) << 8;
+            }
+            FrameType::MessageAnon(discriminator) => {
+                result |= (((discriminator & 0b11_1111_1111_1111) as u32) << 10)
+                    | (((self.type_id & 0b11) as u32) << 8);
+            }
+            FrameType::Service(service_data) => {
+                result |= (((self.type_id & 0xffff) as u32) << 16)
+                    | ((service_data.req_or_resp as u8 as u32) << 15)
+                    | (((service_data.dest_node_id & 0b111_1111) as u32) << 8)
+            }
+        }
 
         // On cyphal, Bits 21 and 22 are 1 when transmitting.
         if on_cyphal {
@@ -248,15 +275,38 @@ impl CanId {
     pub fn from_value(val: u32) -> Self {
         let source_node_id = val as u8 & 0b111_1111;
 
-        let message_type_id = (val >> 8) as u16;
-
         let priority = MsgPriority::from_val((val >> 24) as u8 & 0b1_1111);
+
+        let mut frame_type = FrameType::Message;
+        let mut type_id = 0;
+
+        match (val >> 7) & 1 {
+            0 => match source_node_id {
+                0 => {
+                    frame_type = FrameType::MessageAnon(0);
+                }
+                _ => {
+                    type_id = (val >> 8) as u16;
+                }
+            },
+            1 => {
+                frame_type = FrameType::Service(ServiceData {
+                    dest_node_id: ((val >> 8) & 0b111_1111) as u8,
+                    req_or_resp: if (val >> 15) == 1 {
+                        RequestResponse::Request
+                    } else {
+                        RequestResponse::Response
+                    },
+                });
+            }
+            _ => unreachable!(),
+        }
 
         Self {
             priority,
-            message_type_id,
+            type_id,
             source_node_id,
-            service: false, // todo - hard-coded
+            frame_type,
         }
     }
 }
@@ -540,24 +590,20 @@ fn send_multiple_frames(
 /// Note: The payload must be static, and include space for the tail byte.
 pub fn broadcast(
     can: &mut Can_,
+    frame_type: FrameType,
     msg_type: MsgType,
-    // priority: MsgPriority,
-    // message_type_id: u16,
     source_node_id: u8,
     transfer_id: u8,
-    // mutable for adding tail byte.
-    // payload: &'static mut [u8],
     payload: &mut [u8],
-    // payload_len: u16,
     fd_mode: bool,
 ) -> Result<(), CanError> {
     // todo: Accept a message type instead that includes priority, message type id, and payload len?
 
     let can_id = CanId {
         priority: msg_type.priority(),
-        message_type_id: msg_type.id(),
+        type_id: msg_type.id(),
         source_node_id,
-        service: false, // todo: Customizable.
+        frame_type,
     };
 
     let payload_len = msg_type.payload_size();
@@ -574,16 +620,14 @@ pub fn broadcast(
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
     if payload_len as u16 > (frame_payload_len - 1) as u16 {
+        // For info on the type signature, see https://dronecan.github.io/Specification/3._Data_structure_description_language/,
+        // `Signature` section.
+        // Explicit algorithm, as the docs here are wanting:
+        // https://github.com/dronecan/pydronecan/blob/master/dronecan/dsdl/parser.py#L309
 
-    // For info on the type signature, see https://dronecan.github.io/Specification/3._Data_structure_description_language/,
-    // `Signature` section.
-    // Explicit algorithm, as the docs here are wanting:
-    // https://github.com/dronecan/pydronecan/blob/master/dronecan/dsdl/parser.py#L309
-
-
-    // let signature = Signature::new(None);
-    // let signature = msg_type.signature();
-    // signature.add(sig_bytes); // todo: What is the signature computed with??
+        // let signature = Signature::new(None);
+        // let signature = msg_type.signature();
+        // signature.add(sig_bytes); // todo: What is the signature computed with??
         // todo: You probably need a dedicated module for crc and signature.
 
         return send_multiple_frames(
