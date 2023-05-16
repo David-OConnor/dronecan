@@ -428,11 +428,7 @@ impl HardwareVersion {
         buf[0] = self.major;
         buf[1] = self.minor;
         buf[2..18].clone_from_slice(&self.unique_id);
-        // buf[18..self.certificate_of_authority.len() + 18]
-        //     .clone_frosm_slice(self.certificate_of_authority);
-        // buf[18] = self.certificate_of_authority;
-
-        // Make sure to handle the 7-bit name-size pad after this when composing into node info.
+        // Make sure to handle the 8-bit COA-size pad after this when composing into node info.
         buf
     }
 }

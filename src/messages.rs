@@ -10,7 +10,7 @@ use packed_struct::PackedStruct;
 
 use crate::{
     broadcast, get_tail_byte,
-    gnss::{GlobalNavSolution, GnssAuxiliary},
+    gnss::{GlobalNavSolution, GnssAuxiliary, FixDronecan},
     messages::{self},
     types::{
         self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
@@ -24,15 +24,13 @@ use half::f16;
 use cortex_m;
 
 // #[repr(u16)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq)]
 pub enum MsgType {
     GetNodeInfo,
-    NodeInfo,
     GlobalTimeSync,
     TransportStats,
     Panic,
     Restart,
-    RestartResp,
     ExecuteOpcode,
     GetSet,
     NodeStatus,
@@ -60,12 +58,10 @@ impl MsgType {
     pub const fn id(&self) -> u16 {
         match self {
             Self::GetNodeInfo => 1,
-            Self::NodeInfo => 1,
             Self::GlobalTimeSync => 4,
             Self::TransportStats => 4, // todo: Duplicate id?
             Self::Panic => 5,
-            Self::Restart => 5,     // todo: Duplicate id?
-            Self::RestartResp => 5, // todo: Duplicate id?
+            Self::Restart => 5,
             Self::ExecuteOpcode => 10,
             Self::GetSet => 11,
             Self::NodeStatus => 341,
@@ -110,13 +106,11 @@ impl MsgType {
         // todo: Handle when response has a diff payload size!
         match self {
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
-            Self::GetNodeInfo => 40,
-            Self::NodeInfo => 40, // We add a name to the buf as-required.
+            Self::GetNodeInfo => 41,
             Self::GlobalTimeSync => 7,
             Self::TransportStats => 18,
             Self::Panic => 7, // todo?
             Self::Restart => 5,
-            Self::RestartResp => 1,
             Self::ExecuteOpcode => 0,
             Self::GetSet => 0,
             Self::NodeStatus => PAYLOAD_SIZE_NODE_STATUS as u8,
@@ -134,7 +128,7 @@ impl MsgType {
             Self::SetConfig => 20,                // todo
             Self::Ack => 20,                      // todo
             Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 10,
+            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
             Self::ConfigRxGet => 0,                                 // todo
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4, // todo
         }
@@ -153,12 +147,10 @@ impl MsgType {
     pub fn base_crc(&self) -> u16 {
         match self {
             Self::GetNodeInfo => 55_719,
-            Self::NodeInfo => 55_719, // todo: Same as GetNodeInfo?
             Self::GlobalTimeSync => 30_984,
             Self::TransportStats => 19_827,
             Self::Panic => 64_606,
             Self::Restart => 8_063,
-            Self::RestartResp => 8_063, // todo: Same as restart?
             Self::ExecuteOpcode => 55_252,
             Self::GetSet => 64_272,
             Self::NodeStatus => 48_735,
@@ -245,9 +237,7 @@ static mut BUF_CAN_ID_RESP: [u8; PAYLOAD_SIZE_CAN_ID_RESP] = [0; PAYLOAD_SIZE_CA
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use crate::gnss::FixDronecan;
 use defmt::println;
-use crate::FrameType::Message;
 
 // todo t
 // use crate::{
@@ -297,6 +287,7 @@ pub fn publish_node_status(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -304,10 +295,7 @@ pub fn publish_node_status(
 /// A composite type sent in response to a request.
 pub fn publish_node_info(
     can: &mut crate::Can_,
-    health: NodeHealth,
-    mode: NodeMode,
-    vendor_specific_status_code: u16,
-    uptime_sec: u32,
+    status: &NodeStatus,
     software_version: &SoftwareVersion,
     hardware_version: &HardwareVersion,
     node_name: &[u8],
@@ -315,38 +303,31 @@ pub fn publish_node_info(
     node_id: u8,
     requester_node_id: u8,
 ) -> Result<(), CanError> {
-    let m_type = MsgType::NodeInfo;
+    let m_type = MsgType::GetNodeInfo;
     let mut buf = unsafe { &mut BUF_NODE_INFO };
 
-    if node_name.len() > buf.len() - MsgType::NodeInfo.payload_size() as usize {
+    if node_name.len() > buf.len() - m_type.payload_size() as usize {
         return Err(CanError::PayloadData);
     }
-
-    let status = NodeStatus {
-        uptime_sec,
-        health,
-        mode,
-        vendor_specific_status_code,
-    };
 
     // todo: NodeInfo struct to keep things consistent?
 
     buf[..7].clone_from_slice(&status.to_bytes());
-
-    let bits = buf.view_bits_mut::<Lsb0>();
-
-
-
-    // We have an alignment grenade in the middle of this struct due to the trailing 7-bit `name` field
-    // in Hardware version.
-
-    bits[].store_le(v_u32);
-
     buf[7..22].clone_from_slice(&software_version.to_bytes());
-    // Assumes no hardware cert of authority; includes a 7-bit field for it in serialization.
-
     buf[22..40].clone_from_slice(&hardware_version.to_bytes());
-    buf[40..40 + node_name.len()].clone_from_slice(node_name);
+
+    buf[40] = 0; // COA field = 8-bit length field.
+    let mut bits = buf.view_bits_mut::<Lsb0>();
+
+    let name_start_i = 41 * 8 + 7;
+
+    bits[41 * 8..name_start_i].store_le(node_name.len() as u8); // Name-len field.
+
+    let mut i = name_start_i;
+    for char in node_name {
+        bits[i..i + 8].store_le(*char);
+        i += 8;
+    }
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
@@ -355,8 +336,6 @@ pub fn publish_node_info(
         req_or_resp: RequestResponse::Response,
     });
 
-    // todo: I believe our name is currently cut off; may need to pass len manually to `broadcast`,
-    // since the payload_size() doesn't include it.
 
     println!("Broadcasting node info");
     broadcast(
@@ -367,6 +346,8 @@ pub fn publish_node_info(
         transfer_id as u8,
         buf,
         fd_mode,
+        // the one is for node name len field.
+        Some(m_type.payload_size() as usize + 1 + node_name.len())
     )
 }
 
@@ -402,6 +383,7 @@ pub fn publish_transport_stats(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -432,6 +414,7 @@ pub fn publish_panic(
         transfer_id as u8,
         reason_text,
         fd_mode,
+        None,
     )
 }
 
@@ -460,6 +443,7 @@ pub fn publish_time_sync(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )?;
 
     Ok(())
@@ -494,6 +478,7 @@ pub fn publish_static_pressure(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -525,6 +510,7 @@ pub fn publish_temperature(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -563,15 +549,16 @@ pub fn publish_mag_field_strength(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/ahrs/1003.RawIMU.uavcan
 pub fn publish_raw_imu(
     can: &mut crate::Can_,
-    timestamp: u64,  // 7-bytes
-    gyro: [f32; 3],  // f16. x, y, z. rad/s
-    accel: [f32; 3], // f16. x, y, z. rad/s
+    timestamp: u64,  // 7-bytes, us.
+    gyro: [f32; 3],  // f16. x, y, z. rad/s (Roll, pitch, yaw)
+    accel: [f32; 3], // f16. x, y, z. m/s^2
     // todo: integration?
     // todo: Covariances?
     fd_mode: bool,
@@ -581,7 +568,7 @@ pub fn publish_raw_imu(
 
     let mut buf = unsafe { &mut BUF_RAW_IMU };
 
-    buf[..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes());
+    buf[..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes()[0..7]);
     // integration interval: 0 here.
 
     buf[11..13].clone_from_slice(&f16::from_f32(gyro[0]).to_le_bytes());
@@ -606,6 +593,7 @@ pub fn publish_raw_imu(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -637,6 +625,7 @@ pub fn publish_global_navigation_solution(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -665,6 +654,7 @@ pub fn publish_gnss_aux(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -694,6 +684,7 @@ pub fn publish_fix2(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )
 }
 
@@ -721,7 +712,7 @@ pub fn handle_restart_request(
     node_id: u8,
     requester_node_id: u8,
 ) -> Result<(), CanError> {
-    let m_type = MsgType::RestartResp;
+    let m_type = MsgType::Restart;
 
     let mut num_bytes = [0; 8];
     num_bytes[..5].clone_from_slice(payload);
@@ -730,14 +721,21 @@ pub fn handle_restart_request(
     let transfer_id = TRANSFER_ID_RESTART.fetch_add(1, Ordering::Relaxed);
 
     if magic_number != 0xAC_CE55_1B1E {
+        let frame_type = FrameType::Service(ServiceData {
+            dest_node_id: requester_node_id,
+            req_or_resp: RequestResponse::Response,
+        });
+
+
         broadcast(
             can,
-            FrameType::Message,
+            frame_type,
             m_type,
             node_id,
             transfer_id as u8,
             &mut [0], // ie false; error
             fd_mode,
+            None,
         )?;
 
         return Err(CanError::PayloadData);
@@ -757,6 +755,7 @@ pub fn handle_restart_request(
         &mut [1], // ie true; success
         // 1,
         fd_mode,
+        None,
     )?;
 
     let cp = unsafe { cortex_m::Peripherals::steal() };
@@ -816,6 +815,7 @@ pub fn ack_can_id_change(
         transfer_id as u8,
         buf,
         fd_mode,
+        None,
     )?;
 
     Ok(requested_val)

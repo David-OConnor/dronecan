@@ -598,6 +598,7 @@ pub fn broadcast(
     transfer_id: u8,
     payload: &mut [u8],
     fd_mode: bool,
+    payload_size: Option<usize> // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
     // todo: Accept a message type instead that includes priority, message type id, and payload len?
 
@@ -608,7 +609,10 @@ pub fn broadcast(
         frame_type,
     };
 
-    let payload_len = msg_type.payload_size();
+    let payload_len = match payload_size {
+        Some(l) => l as u16,
+        None => msg_type.payload_size() as u16,
+    };
 
     // We subtract 1 to accomodate the tail byte.
     // let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
