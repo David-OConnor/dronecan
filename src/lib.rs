@@ -71,8 +71,9 @@ pub struct ConfigCommon {
 impl Default for ConfigCommon {
     fn default() -> Self {
         Self {
-            // Between 1 and 127.
-            node_id: 1,
+            // Between 1 and 127. Initialize to 0; this is expected by AP and
+            // Px4, where id is assigned through a node ID server.
+            node_id: 0,
             fd_mode: false,
             can_bitrate: 1_000,
         }
@@ -185,7 +186,7 @@ pub struct ServiceData {
 /// Differentiates between messages and services
 pub enum FrameType {
     Message,
-    MessageAnon(u16), // Inner: the 12-bit discriminator
+    MessageAnon,
     Service(ServiceData),
 }
 
@@ -250,7 +251,16 @@ impl CanId {
             FrameType::Message => {
                 result |= (self.type_id as u32) << 8;
             }
-            FrameType::MessageAnon(discriminator) => {
+            // FrameType::MessageAnon(discriminator) => {
+            FrameType::MessageAnon => {
+                // 12-bit discriminator.
+                // Note: Discriminator should be random. We could use the STM32 RNG periph.
+                // "A possible way of initializing the discriminator value is to apply the transfer
+                // CRC function (as defined above) to the contents of the anonymous message, and then use
+                // any 14 bits of the result. "
+                // todo: Make this random.
+                let discriminator = 2_185;
+
                 result |= (((discriminator & 0b11_1111_1111_1111) as u32) << 10)
                     | (((self.type_id & 0b11) as u32) << 8);
             }
@@ -283,8 +293,8 @@ impl CanId {
         match (val >> 7) & 1 {
             0 => match source_node_id {
                 0 => {
-                    frame_type = FrameType::MessageAnon(0);
-                     type_id = ((val >> 8) & 0b11) as u16;
+                    frame_type = FrameType::MessageAnon;
+                    type_id = ((val >> 8) & 0b11) as u16;
                 }
                 _ => {
                     type_id = (val >> 8) as u16;
@@ -598,7 +608,7 @@ pub fn broadcast(
     transfer_id: u8,
     payload: &mut [u8],
     fd_mode: bool,
-    payload_size: Option<usize> // Overrides that of message_type if present.
+    payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
     // todo: Accept a message type instead that includes priority, message type id, and payload len?
 

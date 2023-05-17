@@ -2,13 +2,14 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
+use core::mem::discriminant;
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
 use crate::{
     broadcast, get_tail_byte,
-    gnss::{GlobalNavSolution, GnssAuxiliary, FixDronecan},
+    gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
     messages::{self},
     types::{
         self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
@@ -24,6 +25,7 @@ use cortex_m;
 // #[repr(u16)]
 #[derive(Clone, Copy, PartialEq)]
 pub enum MsgType {
+    IdAllocation,
     GetNodeInfo,
     GlobalTimeSync,
     TransportStats,
@@ -54,6 +56,7 @@ impl MsgType {
     /// Get the data type id.
     pub const fn id(&self) -> u16 {
         match self {
+            Self::IdAllocation => 1,
             Self::GetNodeInfo => 1,
             Self::GlobalTimeSync => 4,
             Self::TransportStats => 4, // todo: Duplicate id?
@@ -101,6 +104,7 @@ impl MsgType {
         // todo: 0 values are ones we haven't implemented yet.
         // todo: Handle when response has a diff payload size!
         match self {
+            Self::IdAllocation => 1, // Does not include unique id.
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
             Self::GetNodeInfo => 41,
             Self::GlobalTimeSync => 7,
@@ -141,6 +145,7 @@ impl MsgType {
     ///     print(val.base_crc)
     pub fn base_crc(&self) -> u16 {
         match self {
+            Self::IdAllocation => 62_040,
             Self::GetNodeInfo => 55_719,
             Self::GlobalTimeSync => 30_984,
             Self::TransportStats => 19_827,
@@ -182,6 +187,7 @@ pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
 
+pub static TRANSFER_ID_ID_ALLOCATION: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_INFO: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_STATUS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_TIME_SYNC: AtomicUsize = AtomicUsize::new(0);
@@ -211,8 +217,11 @@ pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 // based on payload len. We also assume no `certificate_of_authority` for hardware size.
 // static mut BUF_NODE_INFO: [u8; 64] = [0; MsgType::GetNodeInfo.buf_size()]; // todo: This approach would be better, but not working.
 
+// These ID allocation buffers accomodate the length including full 16-bit unique id.
+static mut BUF_ID_ALLOCATION: [u8; 17] = [0; 17];
+// static mut BUF_ID_RESP: [u8; 17] = [0; 17];
 // This node info buffer is padded to accomodate a 20-character name.
-static mut BUF_NODE_INFO: [u8; 60] = [0; 60];
+static mut BUF_NODE_INFO: [u8; 61] = [0; 61];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
@@ -224,8 +233,6 @@ static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
-
-static mut BUF_CAN_ID_RESP: [u8; PAYLOAD_SIZE_CAN_ID_RESP] = [0; PAYLOAD_SIZE_CAN_ID_RESP];
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 1;
@@ -300,8 +307,6 @@ pub fn publish_node_info(
     let m_type = MsgType::GetNodeInfo;
     let mut buf = unsafe { &mut BUF_NODE_INFO };
 
-    println!("node name: {:?}", node_name);
-
     if node_name.len() > buf.len() - m_type.payload_size() as usize {
         return Err(CanError::PayloadData);
     }
@@ -321,7 +326,6 @@ pub fn publish_node_info(
         req_or_resp: RequestResponse::Response,
     });
 
-
     broadcast(
         can,
         frame_type,
@@ -333,7 +337,8 @@ pub fn publish_node_info(
         // todo: Last digit is snipped; running into a strange issue where chars
         // todo from this are being inserted into the Fix2 frame's last frame, causing
         // todo a CRC mismatch on it. For now, snip the name by 1.
-        Some(m_type.payload_size() as usize + node_name.len() - 1)
+        // todo: Now need 2...
+        Some(m_type.payload_size() as usize + node_name.len() - 2),
     )
 }
 
@@ -674,6 +679,55 @@ pub fn publish_fix2(
     )
 }
 
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
+/// Send while the node is anonymous; requests an ID.
+pub fn request_id_allocation_req(
+    can: &mut crate::Can_,
+    unique_id: [u8; 6],
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let mut buf = unsafe { &mut BUF_ID_ALLOCATION };
+
+    let m_type = MsgType::IdAllocation;
+
+    // node_id, and first_part_of_unique_id are both 0.
+    buf[0] = 0;
+
+    // unique id.
+    // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
+    buf[1..7].copy_from_slice(&unique_id);
+
+    let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::MessageAnon,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
+///
+/// Respond to ID allocation by changing node id appropriately.
+pub fn handle_id_allocation(payload: &[u8], id: &mut u8) -> Result<(), CanError> {
+    // todo: Confirm this is right with LE.
+    let assigned_id = payload[0] & 0b111_1111;
+
+    if !(NODE_ID_MIN_VALUE < assigned_id && assigned_id < NODE_ID_MAX_VALUE) {
+        return Err(CanError::PayloadData);
+    }
+
+    *id = assigned_id;
+
+    Ok(())
+}
+
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
 pub fn handle_time_sync(
     can: &mut crate::Can_,
@@ -712,7 +766,6 @@ pub fn handle_restart_request(
             req_or_resp: RequestResponse::Response,
         });
 
-
         broadcast(
             can,
             frame_type,
@@ -749,66 +802,4 @@ pub fn handle_restart_request(
     // cp.SCB.sys_reset();
 
     Ok(())
-}
-
-/// Acknowledge that node ID was successfully changed.
-/// In firmware, only apply the change if this returns Ok, since it performs checks,
-/// as well as the value to set.
-pub fn ack_can_id_change(
-    can: &mut crate::Can_,
-    node_id_requested: &Value,
-    fd_mode: bool,
-    node_id_current: u8,
-    requester_node_id: u8,
-) -> Result<u8, CanError> {
-    let m_type = MsgType::GetSet;
-
-    let requested_val = match node_id_requested {
-        Value::Integer(node_id_requested) => *node_id_requested as u8,
-        _ => {
-            // todo: Reply back with something over CAN?
-            println!("Non-integer value requested as node id");
-            return Err(CanError::PayloadData);
-        }
-    };
-
-    if !(NODE_ID_MIN_VALUE < requested_val && requested_val < NODE_ID_MAX_VALUE) {
-        return Err(CanError::PayloadData);
-    }
-
-    let mut buf = unsafe { &mut BUF_CAN_ID_RESP };
-
-    let mut name = [0; 20]; // todo: Is this ok?
-    name[0..PARAM_NAME_NODE_ID.len()].copy_from_slice(crate::types::PARAM_NAME_NODE_ID);
-
-    let resp = GetSetResponse {
-        value: *node_id_requested,
-        default_value: None,
-        max_value: Some(NumericValue::Integer(NODE_ID_MAX_VALUE as i64)),
-        min_value: Some(NumericValue::Integer(NODE_ID_MIN_VALUE as i64)),
-        name,
-        name_len: PARAM_NAME_NODE_ID.len(),
-    };
-
-    resp.to_bytes(buf);
-
-    let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
-
-    let frame_type = FrameType::Service(ServiceData {
-        dest_node_id: requester_node_id,
-        req_or_resp: RequestResponse::Response,
-    });
-
-    broadcast(
-        can,
-        FrameType::Message,
-        m_type,
-        node_id_current,
-        transfer_id as u8,
-        buf,
-        fd_mode,
-        None,
-    )?;
-
-    Ok(requested_val)
 }
