@@ -422,13 +422,14 @@ pub struct HardwareVersion {
 }
 
 impl HardwareVersion {
-    pub fn to_bytes(&self) -> [u8; 18] {
-        let mut buf = [0; 18];
+    pub fn to_bytes(&self) -> [u8; 19] {
+        let mut buf = [0; 19];
 
         buf[0] = self.major;
         buf[1] = self.minor;
         buf[2..18].clone_from_slice(&self.unique_id);
-        // Make sure to handle the 8-bit COA-size pad after this when composing into node info.
+        // The final index is our 8-bit length field for COA, which we hard-set to 0.
+        buf[18] = 0;
         buf
     }
 }

@@ -4,8 +4,6 @@
 
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
-use bitvec::prelude::*;
-
 use packed_struct::PackedStruct;
 
 use crate::{
@@ -46,7 +44,6 @@ pub enum MsgType {
     LinkStats, // AnyLeaf custom for now.
     SetConfig, // Anyleaf custom for now.
     // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
-    Ack, // AnyLeaf custom for now.
     ConfigGnssGet,
     ConfigGnss,
     ConfigRxGet,
@@ -77,7 +74,6 @@ impl MsgType {
             Self::LinkStats => 3_104, // AnyLeaf custom for now.
             Self::SetConfig => 3_105, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
-            Self::Ack => 3_106, // AnyLeaf custom for now.
             Self::ConfigGnssGet => 3_110,
             Self::ConfigGnss => 3_111,
             Self::ConfigRxGet => 3_112,
@@ -126,7 +122,6 @@ impl MsgType {
             Self::ChData => 38,                   // todo
             Self::LinkStats => 38,                // todo
             Self::SetConfig => 20,                // todo
-            Self::Ack => 20,                      // todo
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
             Self::ConfigRxGet => 0,                                 // todo
@@ -165,7 +160,6 @@ impl MsgType {
             Self::ChData => 0,
             Self::LinkStats => 0,
             Self::SetConfig => 0,
-            Self::Ack => 0,
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => 0,
             Self::ConfigRxGet => 0,
@@ -306,28 +300,19 @@ pub fn publish_node_info(
     let m_type = MsgType::GetNodeInfo;
     let mut buf = unsafe { &mut BUF_NODE_INFO };
 
+    println!("node name: {:?}", node_name);
+
     if node_name.len() > buf.len() - m_type.payload_size() as usize {
         return Err(CanError::PayloadData);
     }
 
-    // todo: NodeInfo struct to keep things consistent?
-
     buf[..7].clone_from_slice(&status.to_bytes());
     buf[7..22].clone_from_slice(&software_version.to_bytes());
-    buf[22..40].clone_from_slice(&hardware_version.to_bytes());
+    buf[22..41].clone_from_slice(&hardware_version.to_bytes());
 
-    buf[40] = 0; // COA field = 8-bit length field.
-    let mut bits = buf.view_bits_mut::<Lsb0>();
-
-    let name_start_i = 41 * 8 + 7;
-
-    bits[41 * 8..name_start_i].store_le(node_name.len() as u8); // Name-len field.
-
-    let mut i = name_start_i;
-    for char in node_name {
-        bits[i..i + 8].store_le(*char);
-        i += 8;
-    }
+    // Important: There is no node len field for node info. We jump right into
+    // the byte representation. (undocumented in DSL file?)_
+    buf[41..41 + node_name.len()].clone_from_slice(node_name);
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
@@ -337,7 +322,6 @@ pub fn publish_node_info(
     });
 
 
-    println!("Broadcasting node info");
     broadcast(
         can,
         frame_type,
@@ -346,8 +330,10 @@ pub fn publish_node_info(
         transfer_id as u8,
         buf,
         fd_mode,
-        // the one is for node name len field.
-        Some(m_type.payload_size() as usize + 1 + node_name.len())
+        // todo: Last digit is snipped; running into a strange issue where chars
+        // todo from this are being inserted into the Fix2 frame's last frame, causing
+        // todo a CRC mismatch on it. For now, snip the name by 1.
+        Some(m_type.payload_size() as usize + node_name.len() - 1)
     )
 }
 
@@ -773,8 +759,9 @@ pub fn ack_can_id_change(
     node_id_requested: &Value,
     fd_mode: bool,
     node_id_current: u8,
+    requester_node_id: u8,
 ) -> Result<u8, CanError> {
-    let m_type = MsgType::Ack;
+    let m_type = MsgType::GetSet;
 
     let requested_val = match node_id_requested {
         Value::Integer(node_id_requested) => *node_id_requested as u8,
@@ -806,6 +793,11 @@ pub fn ack_can_id_change(
     resp.to_bytes(buf);
 
     let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
+
+    let frame_type = FrameType::Service(ServiceData {
+        dest_node_id: requester_node_id,
+        req_or_resp: RequestResponse::Response,
+    });
 
     broadcast(
         can,
