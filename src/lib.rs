@@ -10,7 +10,7 @@
 
 use core::{
     convert::Infallible,
-    sync::atomic::{self, AtomicBool, Ordering},
+    sync::atomic::{self, AtomicBool, AtomicU16, Ordering},
 };
 
 use fdcan::{
@@ -19,7 +19,7 @@ use fdcan::{
     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
-use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete};
+use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
 
 use defmt::println;
 
@@ -30,6 +30,8 @@ pub mod types;
 
 pub use messages::*;
 pub use types::*;
+
+use crate::crc::{Signature, TransferCrc};
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -44,7 +46,8 @@ static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 
-use crate::crc::{Signature, TransferCrc};
+// We use this during the dynamic node ID allocation procedure.
+// static DISCRIMINATOR: AtomicU16 = AtomicU16::new(0);
 
 #[derive(Clone, Copy)]
 pub enum CanError {
@@ -59,6 +62,8 @@ pub enum CanError {
 pub struct ConfigCommon {
     /// Used to distinguish between multiple instances of this device. Stored in
     /// flash. Must be configured without any other instances of this device connected to the bus.
+    /// Defaults to 0, which allows ID to be configured via the DroneCAN node assignment procedure.
+    /// Can be overwritten, eg by the user, to force a specific ID for use outside that system.
     pub node_id: u8,
     /// Ie, capable of 64-byte frame lens, vice 8.
     pub fd_mode: bool,
@@ -178,16 +183,51 @@ pub enum RequestResponse {
 }
 
 /// Data present in services, but not messages.
+#[derive(PartialEq)]
 pub struct ServiceData {
     pub dest_node_id: u8, // 7 bits
     pub req_or_resp: RequestResponse,
 }
 
 /// Differentiates between messages and services
+#[derive(PartialEq)]
 pub enum FrameType {
     Message,
     MessageAnon,
     Service(ServiceData),
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
+pub struct IdAllocationData {
+    pub node_id: u8, // 7 bytes
+    pub first_part_of_unique_id: bool,
+    pub unique_id: [u8; 16]
+}
+
+impl IdAllocationData {
+    pub fn to_bytes(&self) -> [u8; MsgType::IdAllocation.payload_size() as usize] {
+        let mut result = [0; MsgType::IdAllocation.payload_size() as usize];
+
+        // todo: QC order.
+        result[0] = (self.node_id << 1) | (self.first_part_of_unique_id as u8);
+
+        // unique id.
+        // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
+        result[1..7].copy_from_slice(&self.unique_id[0..6]);
+
+        result
+    }
+
+    pub fn from_bytes(buf: &[u8; MsgType::IdAllocation.payload_size() as usize]) -> Self {
+
+
+        Self {
+            // todo: QC order
+            node_id: (buf[0] <<1) & 0b111_1111,
+            first_part_of_unique_id: (buf[0] & 1) != 0,
+            unique_id: buf[1..17].try_into().unwrap(),
+        }
+    }
 }
 
 /// Construct a CAN ID. See DroneCAN Spec, CAN bus transport layer doc, "ID field" section.
@@ -253,16 +293,21 @@ impl CanId {
             }
             // FrameType::MessageAnon(discriminator) => {
             FrameType::MessageAnon => {
-                // 12-bit discriminator.
-                // Note: Discriminator should be random. We could use the STM32 RNG periph.
-                // "A possible way of initializing the discriminator value is to apply the transfer
-                // CRC function (as defined above) to the contents of the anonymous message, and then use
-                // any 14 bits of the result. "
-                // todo: Make this random.
-                let discriminator = 2_185;
+                // 14-bit discriminator. Discriminator should be random. We use the RNG peripheral.
+                // Once set, we keep it.
+                // todo: Once id allocation works, check if you need to store discrim, or if it
+                // todo can be random each time. If so, remove storage logic.
+                // let discrim_stored = DISCRIMINATOR.load(Ordering::Acquire);
+                // let discriminator = if discrim_stored == 0 {
+                //     (rng::read() & 0b11_1111_1111_1111) as u16
+                // } else {
+                //     discrim_stored
+                // };
+                //
+                let discriminator = (rng::read() & 0b11_1111_1111_1111) as u32;
 
-                result |= (((discriminator & 0b11_1111_1111_1111) as u32) << 10)
-                    | (((self.type_id & 0b11) as u32) << 8);
+                result |= ((discriminator << 10)
+                    | ((self.type_id & 0b11) as u32) << 8);
             }
             FrameType::Service(service_data) => {
                 result |= (((self.type_id & 0xffff) as u32) << 16)
@@ -610,7 +655,11 @@ pub fn broadcast(
     fd_mode: bool,
     payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
-    // todo: Accept a message type instead that includes priority, message type id, and payload len?
+
+    // This saves some if logic in node firmware re decision to broadcast.
+    if source_node_id == 0 && frame_type != FrameType::MessageAnon {
+        return Err(CanError::PayloadData)
+    }
 
     let can_id = CanId {
         priority: msg_type.priority(),

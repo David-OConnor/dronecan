@@ -7,16 +7,10 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{
-    broadcast, get_tail_byte,
-    gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
-    messages::{self},
-    types::{
-        self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
-        SoftwareVersion, Value, PARAM_NAME_NODE_ID,
-    },
-    Can, CanError, FrameType, MsgPriority, RequestResponse, ServiceData,
-};
+use crate::{broadcast, get_tail_byte, gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary}, messages::{self}, types::{
+    self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
+    SoftwareVersion, Value, PARAM_NAME_NODE_ID,
+}, Can, CanError, FrameType, MsgPriority, RequestResponse, ServiceData, IdAllocationData};
 
 use half::f16;
 
@@ -104,7 +98,7 @@ impl MsgType {
         // todo: 0 values are ones we haven't implemented yet.
         // todo: Handle when response has a diff payload size!
         match self {
-            Self::IdAllocation => 1, // Does not include unique id.
+            Self::IdAllocation => 17, // Includes 16 bytes of unique id. (doesn't need len field)
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
             Self::GetNodeInfo => 41,
             Self::GlobalTimeSync => 7,
@@ -217,8 +211,8 @@ pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 // based on payload len. We also assume no `certificate_of_authority` for hardware size.
 // static mut BUF_NODE_INFO: [u8; 64] = [0; MsgType::GetNodeInfo.buf_size()]; // todo: This approach would be better, but not working.
 
-// These ID allocation buffers accomodate the length including full 16-bit unique id.
-static mut BUF_ID_ALLOCATION: [u8; 17] = [0; 17];
+// These ID allocation buffers accomodate the length including full 16-bit unique id, and tail byte.
+static mut BUF_ID_ALLOCATION: [u8; 20] = [0; 20];
 // static mut BUF_ID_RESP: [u8; 17] = [0; 17];
 // This node info buffer is padded to accomodate a 20-character name.
 static mut BUF_NODE_INFO: [u8; 61] = [0; 61];
@@ -683,7 +677,7 @@ pub fn publish_fix2(
 /// Send while the node is anonymous; requests an ID.
 pub fn request_id_allocation_req(
     can: &mut crate::Can_,
-    unique_id: [u8; 6],
+    data: &IdAllocationData,
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
@@ -691,12 +685,7 @@ pub fn request_id_allocation_req(
 
     let m_type = MsgType::IdAllocation;
 
-    // node_id, and first_part_of_unique_id are both 0.
-    buf[0] = 0;
-
-    // unique id.
-    // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
-    buf[1..7].copy_from_slice(&unique_id);
+    buf[0..m_type.payload_size() as usize].clone_from_slice(&data.to_bytes());
 
     let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
 
@@ -708,7 +697,7 @@ pub fn request_id_allocation_req(
         transfer_id as u8,
         buf,
         fd_mode,
-        None,
+        Some(7), // 6 bytes of unique id.
     )
 }
 
