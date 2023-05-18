@@ -38,6 +38,7 @@ pub enum MsgType {
     GlobalNavigationSolution,
     ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
+    ArdupilotGnssStatus,
     SetConfig, // Anyleaf custom for now.
     // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
     ConfigGnssGet,
@@ -69,6 +70,7 @@ impl MsgType {
             Self::GlobalNavigationSolution => 2_000,
             Self::ChData => 3_103,    // AnyLeaf custom for now
             Self::LinkStats => 3_104, // AnyLeaf custom for now.
+            Self::ArdupilotGnssStatus => 20_003,
             Self::SetConfig => 3_105, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
             Self::ConfigGnssGet => 3_110,
@@ -119,6 +121,7 @@ impl MsgType {
             Self::GlobalNavigationSolution => 88, // todo: QC this by checking the unpacked size!!
             Self::ChData => 38,                   // todo
             Self::LinkStats => 38,                // todo
+            Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,                // todo
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
@@ -158,6 +161,7 @@ impl MsgType {
             Self::GlobalNavigationSolution => 7_536,
             Self::ChData => 0,
             Self::LinkStats => 0,
+            Self::ArdupilotGnssStatus => 47_609,
             Self::SetConfig => 0,
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => 0,
@@ -200,6 +204,7 @@ pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::ne
 
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_ARDUPILOT_GNSS_STATUS: AtomicUsize = AtomicUsize::new(0);
 
 // todo: Impl these Arudpilot-specific types:
 // https://github.com/dronecan/DSDL/tree/master/ardupilot/gnss
@@ -227,6 +232,7 @@ static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
+static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 1;
@@ -328,11 +334,7 @@ pub fn publish_node_info(
         transfer_id as u8,
         buf,
         fd_mode,
-        // todo: Last digit is snipped; running into a strange issue where chars
-        // todo from this are being inserted into the Fix2 frame's last frame, causing
-        // todo a CRC mismatch on it. For now, snip the name by 1.
-        // todo: Now need 2...
-        Some(m_type.payload_size() as usize + node_name.len() - 2),
+        Some(m_type.payload_size() as usize + node_name.len()),
     )
 }
 
@@ -671,6 +673,45 @@ pub fn publish_fix2(
     )
 }
 
+/// https://github.com/dronecan/DSDL/blob/master/ardupilot/gnss/20003.Status.uavcan
+/// Standard data type: uavcan.protocol.NodeStatus
+/// Must be broadcast at intervals between 2 and 1000ms. FC firmware should
+/// consider the node to be faulty if this is not received for 3s.
+pub fn publish_ardupilot_gnss_status(
+    can: &mut crate::Can_,
+    error_codes: u32,
+    healthy: bool,
+    status: u32,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let m_type = MsgType::ArdupilotGnssStatus;
+
+    let mut buf = unsafe { &mut BUF_ARDUPILOT_GNSS_STATUS };
+
+    buf[0..4].copy_from_slice(&error_codes.to_le_bytes());
+
+    // let status = status & 0b111_1111_1111_1111_1111_1111;
+
+    // todo: Sort this out.
+    // buf[4..8].copy_from_slice(&((healthy as u32) << 23 | status).to_le_bytes());
+
+    buf[4] = 0x81; // armable and status 0. Having trouble with bit masks.
+
+    let transfer_id = TRANSFER_ID_ARDUPILOT_GNSS_STATUS.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
 /// Send while the node is anonymous; requests an ID.
 pub fn request_id_allocation_req(
@@ -706,21 +747,6 @@ pub fn request_id_allocation_req(
     )
 }
 
-/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
-///
-/// Respond to ID allocation by changing node id appropriately.
-pub fn handle_id_allocation(payload: &[u8], id: &mut u8) -> Result<(), CanError> {
-    // todo: Confirm this is right with LE.
-    let assigned_id = payload[0] & 0b111_1111;
-
-    if !(NODE_ID_MIN_VALUE < assigned_id && assigned_id < NODE_ID_MAX_VALUE) {
-        return Err(CanError::PayloadData);
-    }
-
-    *id = assigned_id;
-
-    Ok(())
-}
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
 pub fn handle_time_sync(
