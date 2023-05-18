@@ -200,7 +200,7 @@ pub enum FrameType {
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
 pub struct IdAllocationData {
     pub node_id: u8, // 7 bytes
-    pub first_part_of_unique_id: bool,
+    pub stage: u8, // 0, 1, or 3.
     pub unique_id: [u8; 16]
 }
 
@@ -208,23 +208,38 @@ impl IdAllocationData {
     pub fn to_bytes(&self) -> [u8; MsgType::IdAllocation.payload_size() as usize] {
         let mut result = [0; MsgType::IdAllocation.payload_size() as usize];
 
-        // todo: QC order.
-        result[0] = (self.node_id << 1) | (self.first_part_of_unique_id as u8);
+        result[0] = (self.node_id << 1) | ((self.stage == 0) as u8);
+
 
         // unique id.
         // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
-        result[1..7].copy_from_slice(&self.unique_id[0..6]);
+        match self.stage {
+            0 => {
+                result[1..7].copy_from_slice(&self.unique_id[0..6]);
+            },
+            1 => {
+                result[1..7].copy_from_slice(&self.unique_id[6..12]);
+            },
+            2 => {
+                result[1..5].copy_from_slice(&self.unique_id[12..16]);
+            },
+            _ => (),
+        };
 
         result
     }
 
     pub fn from_bytes(buf: &[u8; MsgType::IdAllocation.payload_size() as usize]) -> Self {
-
+        let stage = if (buf[0] & 1) != 0 {
+            1
+        } else {
+            0
+        };
 
         Self {
             // todo: QC order
             node_id: (buf[0] <<1) & 0b111_1111,
-            first_part_of_unique_id: (buf[0] & 1) != 0,
+            stage,
             unique_id: buf[1..17].try_into().unwrap(),
         }
     }
@@ -423,10 +438,8 @@ const fn find_tail_byte_index(payload_len: u8) -> usize {
     // We take this comparatively verbose approach vice the loop below to be compatible
     // with const fns.
 
-    // Less than, not equals, since if it's len 8, for example, we need to leave room for the
-    // tail byte at index 7.
     if payload_len < 8 {
-        return 7;
+        return payload_len as usize;
     }
     if payload_len < 12 {
         return 11;

@@ -689,6 +689,13 @@ pub fn request_id_allocation_req(
 
     let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
 
+    // 6 bytes of unique_id unless in the final stage; then 4.
+    let len = if data.stage == 2 {
+        5
+    } else {
+        7
+    };
+
     broadcast(
         can,
         FrameType::MessageAnon,
@@ -697,7 +704,7 @@ pub fn request_id_allocation_req(
         transfer_id as u8,
         buf,
         fd_mode,
-        Some(7), // 6 bytes of unique id.
+        Some(len), // 6 bytes of unique id.
     )
 }
 
