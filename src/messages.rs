@@ -114,7 +114,7 @@ impl MsgType {
             Self::StaticPressure => 6,
             Self::StaticTemperature => 4,
             Self::GnssAux => 16,
-            Self::Fix2 => 51,
+            Self::Fix2 => 50,
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88, // todo: QC this by checking the unpacked size!!
             Self::ChData => 38,                   // todo
@@ -656,8 +656,6 @@ pub fn publish_fix2(
     let m_type = MsgType::Fix2;
 
     buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
-
-    buf[47] = 2; // todo: Why?
 
     let transfer_id = TRANSFER_ID_FIX2.fetch_add(1, Ordering::Relaxed);
 

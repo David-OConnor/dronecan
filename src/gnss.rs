@@ -68,7 +68,7 @@ pub struct FixDronecan {
     #[packed_field(size_bytes = "1")]
     pub num_leap_seconds: u8, // 0 for unknown
     #[packed_field(size_bits = "37")]
-    pub longitude_deg_1e8: i64, // 37 bits
+    pub longitude_deg_1e8: i64, // 37 bits Start byte = 38
     #[packed_field(size_bits = "37")]
     pub latitude_deg_1e8: i64, // 37 bits
     #[packed_field(size_bits = "27")]
@@ -76,11 +76,13 @@ pub struct FixDronecan {
     #[packed_field(size_bits = "27")]
     pub height_msl_mm: i32, // 27 bits
     #[packed_field(element_size_bytes = "4")]
-    pub ned_velocity: [u32; 3], // todo: packed_struct currently doesn't support float.
+     // packed_struct currently doesn't support float.
+    // Start byte: 166
+    pub ned_velocity: [u32; 3],
     #[packed_field(size_bits = "6")]
-    pub sats_used: u8, // 6 bits.
+    pub sats_used: u8, // 6 bits. Start byte: 178
     #[packed_field(size_bits = "2", ty = "enum")]
-    pub fix_status: FixStatus, // 2 bits.
+    pub fix_status: FixStatus,
     #[packed_field(size_bits = "4", ty = "enum")]
     pub mode: GnssMode, // 4 bits.
     #[packed_field(size_bits = "6", ty = "enum")]
@@ -99,9 +101,8 @@ pub struct FixDronecan {
     pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
     #[packed_field(size_bytes = "2")]
     pub pdop: u16, // 16 bits  // f16; packed_struct currently doesn't support float.
-    // pub ecef_position_velocity: Option<EcefPositionVelocity>, // 0 or 1.  // todo: Currently unused.
-    #[packed_field(size_bits = "1")]
-    pub ecef_position_velocity: u8, // <= 1; Set to 0.
+    // #[packed_field(size_bits = "1")]
+    // pub ecef_position_velocity: u8, // <= 1; Set to 0.
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
