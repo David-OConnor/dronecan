@@ -45,6 +45,7 @@ pub enum MsgType {
     ConfigGnss,
     ConfigRxGet,
     ConfigRx,
+    PositFusedAnyleaf,
 }
 
 impl MsgType {
@@ -77,6 +78,7 @@ impl MsgType {
             Self::ConfigGnss => 3_111,
             Self::ConfigRxGet => 3_112,
             Self::ConfigRx => 3_113,
+            Self::PositFusedAnyleaf => 3_115,
             // todo: Anyleaf config sizes?
         }
     }
@@ -91,6 +93,7 @@ impl MsgType {
             Self::StaticPressure => MsgPriority::Nominal,
             Self::Fix2 => MsgPriority::Nominal,
             Self::LinkStats => MsgPriority::Low,
+            Self::PositFusedAnyleaf => MsgPriority::Nominal,
             _ => MsgPriority::Slow,
         }
     }
@@ -127,6 +130,7 @@ impl MsgType {
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
             Self::ConfigRxGet => 0,                                 // todo
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4, // todo
+            Self::PositFusedAnyleaf => 36,
         }
     }
 
@@ -167,6 +171,7 @@ impl MsgType {
             Self::ConfigGnss => 0,
             Self::ConfigRxGet => 0,
             Self::ConfigRx => 0,
+            Self::PositFusedAnyleaf => 0,
         }
     }
 }
@@ -594,7 +599,6 @@ pub fn publish_global_navigation_solution(
 ) -> Result<(), CanError> {
     let m_type = MsgType::GlobalNavigationSolution;
 
-    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
     let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
 
     println!("UNPACKED SIZE FOR NAV SOL: {}. Modify MSG_TYPE.payload_size, and buf size as required with this \

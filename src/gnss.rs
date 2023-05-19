@@ -142,8 +142,8 @@ pub struct GlobalNavSolution {
     pub angular_velocity_body: [u32; 3],
     #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
-    #[packed_field(size_bits = "6")]
-    pub velocity_covariance: u8, //<= 36; Set to 0.
+    // #[packed_field(size_bits = "6")]
+    // pub velocity_covariance: u8, //<= 36; Set to 0.
 }
 //
 // impl GlobalNavSolution {
