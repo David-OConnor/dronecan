@@ -236,7 +236,8 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 64] = [0; 64]; // todo: Size
+ // todo: Not sure how to handle size for this; 88 bytes.
+static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
