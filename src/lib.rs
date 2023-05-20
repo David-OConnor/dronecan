@@ -64,7 +64,7 @@ pub struct ConfigCommon {
     /// flash. Must be configured without any other instances of this device connected to the bus.
     /// Defaults to 0, which allows ID to be configured via the DroneCAN node assignment procedure.
     /// Can be overwritten, eg by the user, to force a specific ID for use outside that system.
-    pub node_id: u8,
+    pub node_id_desired: u8,
     /// Ie, capable of 64-byte frame lens, vice 8.
     pub fd_mode: bool,
     /// Kbps. If less than 1_000, arbitration and data bit rate are the same.
@@ -78,7 +78,7 @@ impl Default for ConfigCommon {
         Self {
             // Between 1 and 127. Initialize to 0; this is expected by AP and
             // Px4, where id is assigned through a node ID server.
-            node_id: 0,
+            node_id_desired: 0,
             fd_mode: false,
             can_bitrate: 1_000,
         }
@@ -88,7 +88,7 @@ impl Default for ConfigCommon {
 impl ConfigCommon {
     pub fn from_bytes(buf: &[u8]) -> Self {
         Self {
-            node_id: buf[0],
+            node_id_desired: buf[0],
             fd_mode: buf[1] != 0,
             can_bitrate: u16::from_le_bytes(buf[2..4].try_into().unwrap()),
         }
@@ -97,7 +97,7 @@ impl ConfigCommon {
     pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_CONFIG_COMMON] {
         let mut result = [0; PAYLOAD_SIZE_CONFIG_COMMON];
 
-        result[0] = self.node_id;
+        result[0] = self.node_id_desired;
         result[1] = self.fd_mode as u8;
         result[2..4].clone_from_slice(&self.can_bitrate.to_le_bytes());
 
