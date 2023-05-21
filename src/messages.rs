@@ -121,7 +121,7 @@ impl MsgType {
             Self::GnssAux => 16,
             Self::Fix2 => 50,
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
-            Self::GlobalNavigationSolution => 88, // todo: QC this by checking the unpacked size!!
+            Self::GlobalNavigationSolution => 88,
             Self::ChData => 38,                   // todo
             Self::LinkStats => 38,                // todo
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
@@ -601,9 +601,6 @@ pub fn publish_global_navigation_solution(
     let m_type = MsgType::GlobalNavigationSolution;
 
     let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
-
-    println!("UNPACKED SIZE FOR NAV SOL: {}. Modify MSG_TYPE.payload_size, and buf size as required with this \
-    / 8!", data.pack().unwrap().len());
 
     buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
 
