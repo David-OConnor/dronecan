@@ -76,7 +76,7 @@ pub struct FixDronecan {
     #[packed_field(size_bits = "27")]
     pub height_msl_mm: i32, // 27 bits
     #[packed_field(element_size_bytes = "4")]
-     // packed_struct currently doesn't support float.
+    // packed_struct currently doesn't support float.
     // Start byte: 166
     pub ned_velocity: [u32; 3],
     #[packed_field(size_bits = "6")]
@@ -101,8 +101,8 @@ pub struct FixDronecan {
     pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
     #[packed_field(size_bytes = "2")]
     pub pdop: u16, // 16 bits  // f16; packed_struct currently doesn't support float.
-    // #[packed_field(size_bits = "1")]
-    // pub ecef_position_velocity: u8, // <= 1; Set to 0.
+                   // #[packed_field(size_bits = "1")]
+                   // pub ecef_position_velocity: u8, // <= 1; Set to 0.
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/navigation/2000.GlobalNavigationSolution.uavcan
@@ -142,8 +142,8 @@ pub struct GlobalNavSolution {
     pub angular_velocity_body: [u32; 3],
     #[packed_field(element_size_bytes = "2")]
     pub linear_acceleration_body: [u16; 3], // f16: Convert prior to using.
-    // #[packed_field(size_bits = "6")]
-    // pub velocity_covariance: u8, //<= 36; Set to 0.
+                                            // #[packed_field(size_bits = "6")]
+                                            // pub velocity_covariance: u8, //<= 36; Set to 0.
 }
 //
 // impl GlobalNavSolution {

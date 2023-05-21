@@ -200,8 +200,8 @@ pub enum FrameType {
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
 pub struct IdAllocationData {
     pub node_id: u8, // 7 bytes
-    pub stage: u8, // 0, 1, or 3.
-    pub unique_id: [u8; 16]
+    pub stage: u8,   // 0, 1, or 3.
+    pub unique_id: [u8; 16],
 }
 
 impl IdAllocationData {
@@ -210,19 +210,18 @@ impl IdAllocationData {
 
         result[0] = (self.node_id << 1) | ((self.stage == 0) as u8);
 
-
         // unique id.
         // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
         match self.stage {
             0 => {
                 result[1..7].copy_from_slice(&self.unique_id[0..6]);
-            },
+            }
             1 => {
                 result[1..7].copy_from_slice(&self.unique_id[6..12]);
-            },
+            }
             2 => {
                 result[1..5].copy_from_slice(&self.unique_id[12..16]);
-            },
+            }
             _ => (),
         };
 
@@ -230,15 +229,11 @@ impl IdAllocationData {
     }
 
     pub fn from_bytes(buf: &[u8; MsgType::IdAllocation.payload_size() as usize]) -> Self {
-        let stage = if (buf[0] & 1) != 0 {
-            1
-        } else {
-            0
-        };
+        let stage = if (buf[0] & 1) != 0 { 1 } else { 0 };
 
         Self {
             // todo: QC order
-            node_id: (buf[0] <<1) & 0b111_1111,
+            node_id: (buf[0] << 1) & 0b111_1111,
             stage,
             unique_id: buf[1..17].try_into().unwrap(),
         }
@@ -321,8 +316,7 @@ impl CanId {
                 //
                 let discriminator = (rng::read() & 0b11_1111_1111_1111) as u32;
 
-                result |= ((discriminator << 10)
-                    | ((self.type_id & 0b11) as u32) << 8);
+                result |= ((discriminator << 10) | ((self.type_id & 0b11) as u32) << 8);
             }
             FrameType::Service(service_data) => {
                 result |= (((self.type_id & 0xffff) as u32) << 16)
@@ -668,10 +662,9 @@ pub fn broadcast(
     fd_mode: bool,
     payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
-
     // This saves some if logic in node firmware re decision to broadcast.
     if source_node_id == 0 && frame_type != FrameType::MessageAnon {
-        return Err(CanError::PayloadData)
+        return Err(CanError::PayloadData);
     }
 
     let can_id = CanId {

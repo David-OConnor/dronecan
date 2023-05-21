@@ -7,10 +7,16 @@ use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
 
-use crate::{broadcast, get_tail_byte, gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary}, messages::{self}, types::{
-    self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
-    SoftwareVersion, Value, PARAM_NAME_NODE_ID,
-}, Can, CanError, FrameType, MsgPriority, RequestResponse, ServiceData, IdAllocationData};
+use crate::{
+    broadcast, get_tail_byte,
+    gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
+    messages::{self},
+    types::{
+        self, GetSetResponse, HardwareVersion, NodeHealth, NodeMode, NodeStatus, NumericValue,
+        SoftwareVersion, Value, PARAM_NAME_NODE_ID,
+    },
+    Can, CanError, FrameType, IdAllocationData, MsgPriority, RequestResponse, ServiceData,
+};
 
 use half::f16;
 
@@ -122,10 +128,10 @@ impl MsgType {
             Self::Fix2 => 50,
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88,
-            Self::ChData => 38,                   // todo
-            Self::LinkStats => 38,                // todo
+            Self::ChData => 38,             // todo
+            Self::LinkStats => 38,          // todo
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
-            Self::SetConfig => 20,                // todo
+            Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
             Self::ConfigRxGet => 0,                                 // todo
@@ -236,7 +242,7 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
- // todo: Not sure how to handle size for this; 88 bytes.
+                                         // todo: Not sure how to handle size for this; 88 bytes.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
@@ -731,11 +737,7 @@ pub fn request_id_allocation_req(
     let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
 
     // 6 bytes of unique_id unless in the final stage; then 4.
-    let len = if data.stage == 2 {
-        5
-    } else {
-        7
-    };
+    let len = if data.stage == 2 { 5 } else { 7 };
 
     broadcast(
         can,
@@ -748,7 +750,6 @@ pub fn request_id_allocation_req(
         Some(len), // 6 bytes of unique id.
     )
 }
-
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
 pub fn handle_time_sync(
