@@ -97,8 +97,11 @@ pub struct FixDronecan {
     /// single bit.
     ///
     /// For len of 36, we get 5.2. So, 6-bits len field.
+    /// Must be a value of 6, due to coariance currently being set up for position only.
     #[packed_field(size_bits = "6")]
-    pub covariance: u8, // This is a single 0 value to indicate we're not using it. 0 is the length.
+    pub covariance_len: u8,
+    #[packed_field(element_size_bytes = "2")]
+    pub covariance: [u16; 6], // f16
     #[packed_field(size_bytes = "2")]
     pub pdop: u16, // 16 bits  // f16; packed_struct currently doesn't support float.
                    // #[packed_field(size_bits = "1")]

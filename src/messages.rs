@@ -125,7 +125,7 @@ impl MsgType {
             Self::StaticPressure => 6,
             Self::StaticTemperature => 4,
             Self::GnssAux => 16,
-            Self::Fix2 => 50,
+            Self::Fix2 => 62, // 50 without covariance, plus 12 with.
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88,
             Self::ChData => 38,             // todo
