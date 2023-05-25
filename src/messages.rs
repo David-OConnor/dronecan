@@ -22,6 +22,8 @@ use half::f16;
 
 use cortex_m;
 
+use bitvec::prelude::*;
+
 // #[repr(u16)]
 #[derive(Clone, Copy, PartialEq)]
 pub enum MsgType {
@@ -34,6 +36,7 @@ pub enum MsgType {
     ExecuteOpcode,
     GetSet,
     NodeStatus,
+    AhrsSolution,
     MagneticFieldStrength2,
     RawImu,
     RawAirData,
@@ -67,6 +70,7 @@ impl MsgType {
             Self::ExecuteOpcode => 10,
             Self::GetSet => 11,
             Self::NodeStatus => 341,
+            Self::AhrsSolution => 1_000,
             Self::MagneticFieldStrength2 => 1_002,
             Self::RawImu => 1_003,
             Self::RawAirData => 1_027,
@@ -92,6 +96,7 @@ impl MsgType {
     pub fn priority(&self) -> MsgPriority {
         match self {
             Self::RawImu => MsgPriority::Immediate,
+            Self::AhrsSolution => MsgPriority::Immediate,
             Self::ChData => MsgPriority::Immediate,
             Self::RawAirData => MsgPriority::Fast,
             Self::MagneticFieldStrength2 => MsgPriority::Fast,
@@ -119,6 +124,9 @@ impl MsgType {
             Self::ExecuteOpcode => 0,
             Self::GetSet => 0,
             Self::NodeStatus => PAYLOAD_SIZE_NODE_STATUS as u8,
+            // AHRS solution: Assumes no covariance values. The first 2 cov fields have a 4-bit
+            // lenght; the last doesn't use one. Includes the void fields.
+            Self::AhrsSolution => 23,
             Self::MagneticFieldStrength2 => 7,
             Self::RawImu => 47,
             Self::RawAirData => 0,
@@ -161,6 +169,7 @@ impl MsgType {
             Self::ExecuteOpcode => 55_252,
             Self::GetSet => 64_272,
             Self::NodeStatus => 48_735,
+            Self::AhrsSolution => 8_277,
             Self::MagneticFieldStrength2 => 47653,
             Self::RawImu => 20_030,
             Self::RawAirData => 20_590,
@@ -204,6 +213,7 @@ pub static TRANSFER_ID_TRANSPORT_STATS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_PANIC: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_RESTART: AtomicUsize = AtomicUsize::new(0);
 
+pub static TRANSFER_ID_AHRS_SOLUTION: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_RAW_IMU: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_AIR_DATA: AtomicUsize = AtomicUsize::new(0);
@@ -236,13 +246,14 @@ static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 
+static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
 static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-                                         // todo: Not sure how to handle size for this; 88 bytes.
+// todo: Not sure how to handle size for this; 88 bytes.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
@@ -500,6 +511,82 @@ pub fn publish_temperature(
     buf[2..4].clone_from_slice(&temperature_variance.to_le_bytes());
 
     let transfer_id = TRANSFER_ID_STATIC_TEMPERATURE.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/ahrs/1000.Solution.uavcan
+pub fn publish_ahrs_solution(
+    can: &mut crate::Can_,
+    timestamp: u64,  // 7-bytes, us.
+    orientation: &[f32; 4], // f16. X Y Z W
+    angular_velocity: &[f32; 3], // f16. X, Y, Z.
+    linear_accel: &[f32; 3], // f16. X, Y, Z.
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let m_type = MsgType::AhrsSolution;
+
+    // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
+    let mut buf = unsafe { &mut BUF_AHRS_SOLUTION };
+
+    let or_x = f16::from_f32(orientation[0]);
+    let or_y = f16::from_f32(orientation[1]);
+    let or_z = f16::from_f32(orientation[2]);
+    let or_w = f16::from_f32(orientation[3]);
+
+    let ang_v_x = f16::from_f32(angular_velocity[0]);
+    let ang_v_y = f16::from_f32(angular_velocity[1]);
+    let ang_v_z = f16::from_f32(angular_velocity[2]);
+
+    let lin_acc_x = f16::from_f32(linear_accel[0]);
+    let lin_acc_y = f16::from_f32(linear_accel[1]);
+    let lin_acc_z = f16::from_f32(linear_accel[2]);
+
+    let bits = buf.view_bits_mut::<Lsb0>();
+
+    let mut i = 0;
+
+    bits[0..i + 7].store_le(timestamp);
+    i += 7;
+
+    for v in &[or_x, or_y, or_z, or_w] {
+        let v = u16::from_le_bytes(v.to_le_bytes());
+        bits[i..i + 16].store_le(v);
+        i += 16;
+    }
+
+    // pad and 0-len covar
+    bits[i..i+8].store_le(0_u8);
+    i += 8;
+
+    for v in &[ang_v_x, ang_v_y, ang_v_z] {
+        let v = u16::from_le_bytes(v.to_le_bytes());
+        bits[i..i + 16].store_le(v);
+        i += 16;
+    }
+
+    bits[i..i+8].store_le(0_u8);
+    i += 8;
+
+    for v in &[lin_acc_x, lin_acc_y, lin_acc_z] {
+        let v = u16::from_le_bytes(v.to_le_bytes());
+        bits[i..i + 16].store_le(v);
+        i += 16;
+    }
+
+    // todo: Covariance as-required.
+
+    let transfer_id = TRANSFER_ID_AHRS_SOLUTION.fetch_add(1, Ordering::Relaxed);
 
     broadcast(
         can,
