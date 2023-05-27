@@ -200,7 +200,7 @@ impl MsgType {
 // 110/8 = 13.75
 pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
 
-pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
+pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 3;
 
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
@@ -297,7 +297,7 @@ pub fn publish_node_status(
     let m_type = MsgType::NodeStatus;
 
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_NODE_STATUS as u8) + 1];
-    let mut buf = unsafe { &mut BUF_NODE_STATUS };
+    let buf = unsafe { &mut BUF_NODE_STATUS };
 
     buf[..m_type.payload_size() as usize].clone_from_slice(&status.to_bytes());
 
@@ -328,7 +328,7 @@ pub fn publish_node_info(
     requester_node_id: u8,
 ) -> Result<(), CanError> {
     let m_type = MsgType::GetNodeInfo;
-    let mut buf = unsafe { &mut BUF_NODE_INFO };
+    let buf = unsafe { &mut BUF_NODE_INFO };
 
     if node_name.len() > buf.len() - m_type.payload_size() as usize {
         return Err(CanError::PayloadData);
@@ -375,7 +375,7 @@ pub fn publish_transport_stats(
 ) -> Result<(), CanError> {
     let m_type = MsgType::TransportStats;
 
-    let mut buf = unsafe { &mut BUF_TRANSPORT_STATS };
+    let buf = unsafe { &mut BUF_TRANSPORT_STATS };
 
     buf[..6].clone_from_slice(&num_transmitted.to_le_bytes()[..6]);
     buf[6..12].clone_from_slice(&num_received.to_le_bytes()[..6]);
@@ -437,7 +437,7 @@ pub fn publish_time_sync(
 ) -> Result<(), CanError> {
     let m_type = MsgType::GlobalTimeSync;
 
-    let mut buf = unsafe { &mut BUF_TIME_SYNC };
+    let buf = unsafe { &mut BUF_TIME_SYNC };
 
     buf[..7].clone_from_slice(
         &(previous_transmission_timestamp_usec & 0xff_ffff_ffff_ffff).to_le_bytes(),
@@ -471,7 +471,7 @@ pub fn publish_static_pressure(
 ) -> Result<(), CanError> {
     let m_type = MsgType::StaticPressure;
 
-    let mut buf = unsafe { &mut BUF_PRESSURE };
+    let buf = unsafe { &mut BUF_PRESSURE };
 
     buf[..4].copy_from_slice(&pressure.to_le_bytes());
 
@@ -502,7 +502,7 @@ pub fn publish_temperature(
 ) -> Result<(), CanError> {
     let m_type = MsgType::StaticTemperature;
 
-    let mut buf = unsafe { &mut BUF_TEMPERATURE };
+    let buf = unsafe { &mut BUF_TEMPERATURE };
 
     let temperature = f16::from_f32(temperature);
     buf[..2].clone_from_slice(&temperature.to_le_bytes());
@@ -537,7 +537,7 @@ pub fn publish_ahrs_solution(
     let m_type = MsgType::AhrsSolution;
 
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
-    let mut buf = unsafe { &mut BUF_AHRS_SOLUTION };
+    let buf = unsafe { &mut BUF_AHRS_SOLUTION };
 
     let or_x = f16::from_f32(orientation[0]);
     let or_y = f16::from_f32(orientation[1]);
@@ -612,7 +612,7 @@ pub fn publish_mag_field_strength(
     let m_type = MsgType::MagneticFieldStrength2;
 
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
-    let mut buf = unsafe { &mut BUF_MAGNETIC_FIELD_STRENGTH2 };
+    let buf = unsafe { &mut BUF_MAGNETIC_FIELD_STRENGTH2 };
 
     let field_x = f16::from_f32(magnetic_field[0]);
     let field_y = f16::from_f32(magnetic_field[1]);
@@ -652,7 +652,7 @@ pub fn publish_raw_imu(
 ) -> Result<(), CanError> {
     let m_type = MsgType::RawImu;
 
-    let mut buf = unsafe { &mut BUF_RAW_IMU };
+    let buf = unsafe { &mut BUF_RAW_IMU };
 
     buf[..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes()[0..7]);
     // integration interval: 0 here.
@@ -693,7 +693,7 @@ pub fn publish_global_navigation_solution(
 ) -> Result<(), CanError> {
     let m_type = MsgType::GlobalNavigationSolution;
 
-    let mut buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
+    let buf = unsafe { &mut BUF_GLOBAL_NAVIGATION_SOLUTION };
 
     buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
 
@@ -720,7 +720,7 @@ pub fn publish_gnss_aux(
     node_id: u8,
 ) -> Result<(), CanError> {
     // let mut buf = [0; crate::find_tail_byte_index(PAYLOAD_SIZE_MAGNETIC_FIELD_STRENGTH2 as u8) + 1];
-    let mut buf = unsafe { &mut BUF_GNSS_AUX };
+    let buf = unsafe { &mut BUF_GNSS_AUX };
 
     let m_type = MsgType::GnssAux;
 
@@ -748,7 +748,7 @@ pub fn publish_fix2(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = unsafe { &mut BUF_FIX2 };
+    let buf = unsafe { &mut BUF_FIX2 };
 
     let m_type = MsgType::Fix2;
 
@@ -782,7 +782,7 @@ pub fn publish_ardupilot_gnss_status(
 ) -> Result<(), CanError> {
     let m_type = MsgType::ArdupilotGnssStatus;
 
-    let mut buf = unsafe { &mut BUF_ARDUPILOT_GNSS_STATUS };
+    let buf = unsafe { &mut BUF_ARDUPILOT_GNSS_STATUS };
 
     buf[0..4].copy_from_slice(&error_codes.to_le_bytes());
 
@@ -815,7 +815,7 @@ pub fn request_id_allocation_req(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let mut buf = unsafe { &mut BUF_ID_ALLOCATION };
+    let buf = unsafe { &mut BUF_ID_ALLOCATION };
 
     let m_type = MsgType::IdAllocation;
 

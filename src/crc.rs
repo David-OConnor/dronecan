@@ -101,12 +101,12 @@ impl TransferCrc {
 ///
 ///     println!("sig value: {}. (Should be 0x62EC59E3F1A4F00A)", sig.value());
 /// (Passes CAO 11 May 2023)
-pub struct Signature {
+pub struct _Signature {
     crc: u64,
 }
 
-impl Signature {
-    pub fn new(extend_from: Option<u64>) -> Self {
+impl _Signature {
+    pub fn _new(extend_from: Option<u64>) -> Self {
         let crc = match extend_from {
             Some(e) => (e & SIGNATURE_MASK64) ^ SIGNATURE_MASK64,
             None => SIGNATURE_MASK64,
@@ -115,7 +115,7 @@ impl Signature {
         Self { crc }
     }
 
-    pub fn add(&mut self, data_bytes: &[u8]) {
+    pub fn _add(&mut self, data_bytes: &[u8]) {
         for byte in data_bytes {
             self.crc ^= ((*byte as u64) << 56) & SIGNATURE_MASK64;
 
@@ -129,7 +129,7 @@ impl Signature {
         }
     }
 
-    pub fn value(&self) -> u64 {
+    pub fn _value(&self) -> u64 {
         (self.crc & SIGNATURE_MASK64) ^ SIGNATURE_MASK64
     }
 }

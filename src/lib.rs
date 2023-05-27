@@ -21,6 +21,8 @@ use fdcan::{
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
 
+use num_enum::TryFromPrimitive;
+
 use defmt::println;
 
 mod crc;
@@ -31,7 +33,7 @@ pub mod types;
 pub use messages::*;
 pub use types::*;
 
-use crate::crc::{Signature, TransferCrc};
+use crate::crc::{TransferCrc};
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -57,6 +59,55 @@ pub enum CanError {
     PayloadData,
 }
 
+/// Using fixed values makes configuring the clocks more deterministic and reliable.
+#[derive(Clone, Copy, PartialEq, TryFromPrimitive)]
+#[repr(u8)]
+pub enum CanBitrate {
+    B250k = 0,
+    B500k = 1,
+    B1m = 2,
+    B2m = 3,
+    B4m = 4,
+    B5m = 5,
+    B8m = 6,
+}
+
+impl Default for CanBitrate {
+    fn default() -> Self {
+        Self::B1m
+    }
+}
+
+impl CanBitrate {
+    /// Get timings for devcies that have a 160Mhz CAN clock. Note that timings are available for
+    /// most of these using a 170Mhz clock as well.
+    /// Returns (prescaler, segment 1, segment 2)
+    /// http://www.bittiming.can-wiki.info/
+    pub fn timings_160_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (40, 13, 2),
+            Self::B500k => (20, 13, 2),
+            Self::B1m => (10, 13, 2),
+            Self::B2m => (5, 13, 2),
+            Self::B4m => (4, 8, 1),
+            Self::B5m => (2, 13, 2),
+            Self::B8m => (2, 8, 1),
+        }
+    }
+
+    pub fn timings_170_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (40, 14, 2),
+            Self::B500k => (20, 14, 2),
+            Self::B1m => (10, 14, 2),
+            Self::B2m => (5, 14, 2),
+            Self::B4m => unimplemented!(),
+            Self::B5m => (2, 14, 2),
+            Self::B8m => unimplemented!(),
+        }
+    }
+}
+
 /// This includes configuration data that we use on all nodes, and is not part of the official
 /// DroneCAN spec.
 pub struct ConfigCommon {
@@ -69,8 +120,8 @@ pub struct ConfigCommon {
     pub fd_mode: bool,
     /// Kbps. If less than 1_000, arbitration and data bit rate are the same.
     /// If greater than 1_000, arbitration bit rate stays at 1_000 due to protocol limits
-    /// , while data bit rate is this value.
-    pub can_bitrate: u16,
+    ///, while data bit rate is this value.
+    pub can_bitrate: CanBitrate,
 }
 
 impl Default for ConfigCommon {
@@ -80,7 +131,7 @@ impl Default for ConfigCommon {
             // Px4, where id is assigned through a node ID server.
             node_id_desired: 0,
             fd_mode: false,
-            can_bitrate: 1_000,
+            can_bitrate: CanBitrate::default(),
         }
     }
 }
@@ -90,7 +141,7 @@ impl ConfigCommon {
         Self {
             node_id_desired: buf[0],
             fd_mode: buf[1] != 0,
-            can_bitrate: u16::from_le_bytes(buf[2..4].try_into().unwrap()),
+            can_bitrate: buf[2].try_into().unwrap(),
         }
     }
 
@@ -99,7 +150,7 @@ impl ConfigCommon {
 
         result[0] = self.node_id_desired;
         result[1] = self.fd_mode as u8;
-        result[2..4].clone_from_slice(&self.can_bitrate.to_le_bytes());
+        result[2] = self.can_bitrate as u8;
 
         result
     }
@@ -316,7 +367,7 @@ impl CanId {
                 //
                 let discriminator = (rng::read() & 0b11_1111_1111_1111) as u32;
 
-                result |= ((discriminator << 10) | ((self.type_id & 0b11) as u32) << 8);
+                result |= (discriminator << 10) | ((self.type_id & 0b11) as u32) << 8;
             }
             FrameType::Service(service_data) => {
                 result |= (((self.type_id & 0xffff) as u32) << 16)
@@ -557,7 +608,6 @@ fn send_multiple_frames(
     can_id: u32,
     transfer_id: u8,
     fd_mode: bool,
-    // data_type_signature: u64,
     base_crc: u16,
 ) -> Result<(), CanError> {
     let frame_payload_len = if fd_mode {
@@ -691,16 +741,6 @@ pub fn broadcast(
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
     if payload_len as u16 > (frame_payload_len - 1) as u16 {
-        // For info on the type signature, see https://dronecan.github.io/Specification/3._Data_structure_description_language/,
-        // `Signature` section.
-        // Explicit algorithm, as the docs here are wanting:
-        // https://github.com/dronecan/pydronecan/blob/master/dronecan/dsdl/parser.py#L309
-
-        // let signature = Signature::new(None);
-        // let signature = msg_type.signature();
-        // signature.add(sig_bytes); // todo: What is the signature computed with??
-        // todo: You probably need a dedicated module for crc and signature.
-
         return send_multiple_frames(
             can,
             payload,
@@ -708,7 +748,6 @@ pub fn broadcast(
             can_id.value(),
             transfer_id,
             fd_mode,
-            // signature,
             msg_type.base_crc(),
         );
     }
