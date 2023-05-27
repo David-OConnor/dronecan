@@ -18,6 +18,8 @@ num_enum = { version = "^0.6.0", default_features = false }
 # 16-bit floating point.
 half = { version = "^2.2.1", default_features = false }
 
+num-traits = { version = "^0.2.15", default_features = false } # Rounding.
+
 # For the tightly-packed and many-fielded Fix2.
 packed_struct = {version = "^0.10.1", default_features = false }
 

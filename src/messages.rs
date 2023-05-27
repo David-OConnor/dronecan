@@ -2,10 +2,11 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
-use core::mem::discriminant;
 use core::sync::atomic::{self, AtomicUsize, Ordering};
 
 use packed_struct::PackedStruct;
+
+use num_traits::float::FloatCore; // to round.
 
 use crate::{
     broadcast, get_tail_byte,
@@ -45,6 +46,7 @@ pub enum MsgType {
     GnssAux,
     Fix2,
     GlobalNavigationSolution,
+    RcInput,   // WIP
     ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
     ArdupilotGnssStatus,
@@ -79,6 +81,7 @@ impl MsgType {
             Self::GnssAux => 1_061,
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
+            Self::RcInput => 20_400,
             Self::ChData => 3_103,    // AnyLeaf custom for now
             Self::LinkStats => 3_104, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
@@ -136,14 +139,16 @@ impl MsgType {
             Self::Fix2 => 62, // 50 without covariance, plus 12 with.
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88,
+            // This is the rssi and status items; add 12 bits for every channel
+            Self::RcInput => 3,
             Self::ChData => 38,             // todo
             Self::LinkStats => 38,          // todo
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
-            Self::ConfigRxGet => 0,                                 // todo
-            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4, // todo
+            Self::ConfigRxGet => 0,
+            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 2,
             Self::PositFusedAnyleaf => 36,
         }
     }
@@ -178,6 +183,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
+            Self::RcInput => 69, // todo: Get this from Python once the PR is merged.
             Self::ChData => 0,
             Self::LinkStats => 0,
             Self::ArdupilotGnssStatus => 47_609,
@@ -200,7 +206,7 @@ impl MsgType {
 // 110/8 = 13.75
 pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
 
-pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 3;
+pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
@@ -222,6 +228,7 @@ pub static TRANSFER_ID_STATIC_TEMPERATURE: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GNSS_AUX: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_RC_INPUT: AtomicUsize = AtomicUsize::new(0);
 
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
@@ -253,8 +260,11 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-// todo: Not sure how to handle size for this; 88 bytes.
+                                         // todo: Not sure how to handle size for this; 88 bytes.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
+
+// This buffer accomodates up to 16 12-bit channels. (195 bits)
+static mut BUF_RC_INPUT: [u8; 200] = [0; 200];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
@@ -262,17 +272,6 @@ pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
 use defmt::println;
-
-// todo t
-// use crate::{
-//     gnss::GlobalNavSolution,
-//     types::{HardwareVersion, NodeHealth, NodeMode, NodeStatus, SoftwareVersion},
-// };
-// use fdcan::{
-//     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-//     id::{ExtendedId, Id},
-//     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
-// };
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 /// Standard data type: uavcan.protocol.NodeStatus
@@ -398,7 +397,6 @@ pub fn publish_transport_stats(
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/5.Panic.uavcan
-/// todo: What is the data type ID? 5 is in conflict.
 /// "Nodes that are expected to react to this message should wait for at least MIN_MESSAGES subsequent messages
 /// with any reason text from any sender published with the interval no higher than MAX_INTERVAL_MS before
 /// undertaking any emergency actions." (Min messages: 3. Max interval: 500ms)
@@ -527,10 +525,10 @@ pub fn publish_temperature(
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/ahrs/1000.Solution.uavcan
 pub fn publish_ahrs_solution(
     can: &mut crate::Can_,
-    timestamp: u64,  // 7-bytes, us.
-    orientation: &[f32; 4], // f16. X Y Z W
+    timestamp: u64,              // 7-bytes, us.
+    orientation: &[f32; 4],      // f16. X Y Z W
     angular_velocity: &[f32; 3], // f16. X, Y, Z.
-    linear_accel: &[f32; 3], // f16. X, Y, Z.
+    linear_accel: &[f32; 3],     // f16. X, Y, Z.
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
@@ -566,7 +564,7 @@ pub fn publish_ahrs_solution(
     }
 
     // pad and 0-len covar
-    bits[i..i+8].store_le(0_u8);
+    bits[i..i + 8].store_le(0_u8);
     i += 8;
 
     for v in &[ang_v_x, ang_v_y, ang_v_z] {
@@ -575,7 +573,7 @@ pub fn publish_ahrs_solution(
         i += 16;
     }
 
-    bits[i..i+8].store_le(0_u8);
+    bits[i..i + 8].store_le(0_u8);
     i += 8;
 
     for v in &[lin_acc_x, lin_acc_y, lin_acc_z] {
@@ -804,6 +802,46 @@ pub fn publish_ardupilot_gnss_status(
         buf,
         fd_mode,
         None,
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/sensors/rc/20400.RCInput.uavcan
+pub fn publish_rc_input(
+    can: &mut crate::Can_,
+    status: u8,
+    // 1: valid. 2: failsafe.
+    rssi: u8,
+    rc_in: &[u16], // Each is 12-bits
+    num_channels: u8,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_RC_INPUT };
+
+    let m_type = MsgType::RcInput;
+
+    let payload_len =
+        ((m_type.payload_size() as f32 + 12. * num_channels as f32) / 8.).ceil() as usize;
+
+    let bits = buf.view_bits_mut::<Lsb0>();
+
+    let mut i_bits = 24; // (u16 + u8 admin data)
+    for ch in rc_in {
+        bits[i_bits..i_bits + 12].store_le(*ch);
+        i_bits += 12;
+    }
+
+    let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        Some(payload_len),
     )
 }
 

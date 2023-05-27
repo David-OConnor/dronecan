@@ -33,7 +33,7 @@ pub mod types;
 pub use messages::*;
 pub use types::*;
 
-use crate::crc::{TransferCrc};
+use crate::crc::TransferCrc;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -115,7 +115,10 @@ pub struct ConfigCommon {
     /// flash. Must be configured without any other instances of this device connected to the bus.
     /// Defaults to 0, which allows ID to be configured via the DroneCAN node assignment procedure.
     /// Can be overwritten, eg by the user, to force a specific ID for use outside that system.
-    pub node_id_desired: u8,
+    pub node_id: u8,
+    /// If true, the `node_id` field is a desired ID; get ID from an allocator.
+    /// if false, hard-set the node id field. Defaults to `true`.
+    pub dynamic_id_allocation: bool,
     /// Ie, capable of 64-byte frame lens, vice 8.
     pub fd_mode: bool,
     /// Kbps. If less than 1_000, arbitration and data bit rate are the same.
@@ -129,7 +132,8 @@ impl Default for ConfigCommon {
         Self {
             // Between 1 and 127. Initialize to 0; this is expected by AP and
             // Px4, where id is assigned through a node ID server.
-            node_id_desired: 0,
+            node_id: 0,
+            dynamic_id_allocation: true,
             fd_mode: false,
             can_bitrate: CanBitrate::default(),
         }
@@ -139,18 +143,20 @@ impl Default for ConfigCommon {
 impl ConfigCommon {
     pub fn from_bytes(buf: &[u8]) -> Self {
         Self {
-            node_id_desired: buf[0],
-            fd_mode: buf[1] != 0,
-            can_bitrate: buf[2].try_into().unwrap(),
+            node_id: buf[0],
+            dynamic_id_allocation: buf[1] != 0,
+            fd_mode: buf[2] != 0,
+            can_bitrate: buf[3].try_into().unwrap_or_default(),
         }
     }
 
     pub fn to_bytes(&self) -> [u8; PAYLOAD_SIZE_CONFIG_COMMON] {
         let mut result = [0; PAYLOAD_SIZE_CONFIG_COMMON];
 
-        result[0] = self.node_id_desired;
-        result[1] = self.fd_mode as u8;
-        result[2] = self.can_bitrate as u8;
+        result[0] = self.node_id;
+        result[1] = self.dynamic_id_allocation as u8;
+        result[2] = self.fd_mode as u8;
+        result[3] = self.can_bitrate as u8;
 
         result
     }
