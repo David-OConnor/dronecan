@@ -20,6 +20,17 @@ const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
 // Size in bits of the value string's size byte (leading byte)
 const VALUE_STRING_LEN_SIZE: usize = 8; // round_up(log2(128+1));
 
+
+/// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum NodeHealth {
+    Ok = 0,
+    Warning = 1,
+    Error = 2,
+    Critical = 3,
+}
+
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
 #[repr(u8)]
@@ -53,16 +64,6 @@ impl NodeStatus {
 
         result
     }
-}
-
-/// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
-#[derive(Clone, Copy)]
-#[repr(u8)]
-pub enum NodeHealth {
-    Ok = 0,
-    Warning = 1,
-    Error = 2,
-    Critical = 3,
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/10.ExecuteOpcode.uavcan

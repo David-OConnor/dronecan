@@ -204,7 +204,7 @@ impl MsgType {
 // name: 14
 //
 // 110/8 = 13.75
-pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
+// pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
 
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
@@ -248,7 +248,7 @@ pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 static mut BUF_ID_ALLOCATION: [u8; 20] = [0; 20];
 // static mut BUF_ID_RESP: [u8; 17] = [0; 17];
 // This node info buffer is padded to accomodate a 20-character name.
-static mut BUF_NODE_INFO: [u8; 61] = [0; 61];
+static mut BUF_NODE_INFO: [u8; 64] = [0; 64];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
@@ -260,7 +260,7 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-                                         // todo: Not sure how to handle size for this; 88 bytes.
+// todo: Not sure how to handle size for this; 88 bytes.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 
 // This buffer accomodates up to 16 12-bit channels. (195 bits)
@@ -337,9 +337,28 @@ pub fn publish_node_info(
     buf[7..22].clone_from_slice(&software_version.to_bytes());
     buf[22..41].clone_from_slice(&hardware_version.to_bytes());
 
-    // Important: There is no node len field for node info. We jump right into
-    // the byte representation. (undocumented in DSL file?)_
-    buf[41..41 + node_name.len()].clone_from_slice(node_name);
+    // Important: In legacy mode, there is no node len field for node info, due to tail array
+    // optimization; We jump right into the byte representation.
+    // In FD mode, a 7-bit node len field is required. This may be due to a detail in FD, or in
+    // whether the packet is split over multiple bytes. I've submitted a Github issue
+    // to always use byte-len of 1.
+    if fd_mode {
+        let bits = buf.view_bits_mut::<Lsb0>();
+
+        let mut i_bit = 41 * 8;
+        // Actually, I have no idea. Re the bit shift left here and i_bit += 9.
+        // I am just aping PyDronecan; this is nuts.
+        bits[i_bit..i_bit + 7].store_le((node_name.len()<<1) as u8);
+
+        i_bit += 9;
+
+        for char in node_name {
+            bits[i_bit..i_bit + 8].store_le(*char);
+            i_bit += 8;
+        }
+    } else {
+        buf[41..41 + node_name.len()].clone_from_slice(node_name);
+    }
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
@@ -347,6 +366,9 @@ pub fn publish_node_info(
         dest_node_id: requester_node_id,
         req_or_resp: RequestResponse::Response,
     });
+    //
+    // println!("NInfo pl: {}", buf);
+    // println!("Node info pl len: {:?}", m_type.payload_size() as usize + node_name.len());
 
     broadcast(
         can,
@@ -857,12 +879,20 @@ pub fn request_id_allocation_req(
 
     let m_type = MsgType::IdAllocation;
 
-    buf[0..m_type.payload_size() as usize].clone_from_slice(&data.to_bytes());
+    buf[0..m_type.payload_size() as usize].clone_from_slice(&data.to_bytes(fd_mode));
+
+    // todo: Does id allocation process always need to be 8-byte frames? Experiment
 
     let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
 
+    // todo: Make this work with FD frames.
     // 6 bytes of unique_id unless in the final stage; then 4.
-    let len = if data.stage == 2 { 5 } else { 7 };
+    let len = if fd_mode {
+        m_type.payload_size() as usize
+    } else {
+        if data.stage == 2 { 5 } else { 7 }
+    };
+    println!("Req alloc");
 
     broadcast(
         can,
@@ -872,7 +902,7 @@ pub fn request_id_allocation_req(
         transfer_id as u8,
         buf,
         fd_mode,
-        Some(len), // 6 bytes of unique id.
+        Some(len),
     )
 }
 

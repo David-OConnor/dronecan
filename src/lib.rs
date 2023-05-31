@@ -24,6 +24,7 @@ use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
 use num_enum::TryFromPrimitive;
 
 use defmt::println;
+use stm32_hal2::sai::FsSignal::Frame;
 
 mod crc;
 pub mod gnss;
@@ -44,12 +45,8 @@ static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
     [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64],
 ];
 
-// static FD_MODE: AtomicBool = AtomicBool::new(true);
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
-
-// We use this during the dynamic node ID allocation procedure.
-// static DISCRIMINATOR: AtomicU16 = AtomicU16::new(0);
 
 #[derive(Clone, Copy)]
 pub enum CanError {
@@ -262,25 +259,29 @@ pub struct IdAllocationData {
 }
 
 impl IdAllocationData {
-    pub fn to_bytes(&self) -> [u8; MsgType::IdAllocation.payload_size() as usize] {
+    pub fn to_bytes(&self, fd_mode: bool) -> [u8; MsgType::IdAllocation.payload_size() as usize] {
         let mut result = [0; MsgType::IdAllocation.payload_size() as usize];
 
         result[0] = (self.node_id << 1) | ((self.stage == 0) as u8);
 
-        // unique id.
-        // todo: Should be no longer than 6 bytes if not on FD. For now, hard-coding it.
-        match self.stage {
-            0 => {
-                result[1..7].copy_from_slice(&self.unique_id[0..6]);
-            }
-            1 => {
-                result[1..7].copy_from_slice(&self.unique_id[6..12]);
-            }
-            2 => {
-                result[1..5].copy_from_slice(&self.unique_id[12..16]);
-            }
-            _ => (),
-        };
+        // unique id. Split across payloads if not on FD mode.
+        if fd_mode {
+            result[1..17].copy_from_slice(&self.unique_id);
+        } else {
+            match self.stage {
+                0 => {
+                    result[1..7].copy_from_slice(&self.unique_id[0..6]);
+                }
+                1 => {
+                    result[1..7].copy_from_slice(&self.unique_id[6..12]);
+                }
+                2 => {
+                    result[1..5].copy_from_slice(&self.unique_id[12..16]);
+                }
+                _ => (),
+            };
+        }
+
 
         result
     }
@@ -362,15 +363,6 @@ impl CanId {
             FrameType::MessageAnon => {
                 // 14-bit discriminator. Discriminator should be random. We use the RNG peripheral.
                 // Once set, we keep it.
-                // todo: Once id allocation works, check if you need to store discrim, or if it
-                // todo can be random each time. If so, remove storage logic.
-                // let discrim_stored = DISCRIMINATOR.load(Ordering::Acquire);
-                // let discriminator = if discrim_stored == 0 {
-                //     (rng::read() & 0b11_1111_1111_1111) as u16
-                // } else {
-                //     discrim_stored
-                // };
-                //
                 let discriminator = (rng::read() & 0b11_1111_1111_1111) as u32;
 
                 result |= (discriminator << 10) | ((self.type_id & 0b11) as u32) << 8;
@@ -548,7 +540,10 @@ fn can_send(
         len: frame_data_len,
         frame_format,
         id,
-        bit_rate_switching: true,
+        // todo: Bit-rate switching set to true causes FD frames not to be
+        // todo received by DC.
+        // todo: Leave it off UFN.
+        bit_rate_switching: false,
         marker: None,
     };
 
@@ -719,6 +714,7 @@ pub fn broadcast(
     payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
     // This saves some if logic in node firmware re decision to broadcast.
+
     if source_node_id == 0 && frame_type != FrameType::MessageAnon {
         return Err(CanError::PayloadData);
     }
@@ -735,8 +731,6 @@ pub fn broadcast(
         None => msg_type.payload_size() as u16,
     };
 
-    // We subtract 1 to accomodate the tail byte.
-    // let frame_payload_len = if FD_MODE.load(Ordering::Acquire) {
     let frame_payload_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
     } else {
