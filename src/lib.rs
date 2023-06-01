@@ -19,6 +19,8 @@ use fdcan::{
     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
+use bitvec::prelude::*;
+
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
 
 use num_enum::TryFromPrimitive;
@@ -266,7 +268,32 @@ impl IdAllocationData {
 
         // unique id. Split across payloads if not on FD mode.
         if fd_mode {
-            result[1..17].copy_from_slice(&self.unique_id);
+            // Must include the 5-bit unique_id len field in FD mode.
+
+            let bits = result.view_bits_mut::<Lsb0>();
+
+            let mut i_bit = 1 * 8;
+            // More confusing bit-shift logic, between the DC spec, and `bitvec` lib.
+            // Note: We're hard-coding unique id's length to be 16.
+            bits[i_bit..i_bit + 5].store_le(16);
+
+
+            i_bit += 5;
+
+            // So, how do we combine 16 and 49 to get 129?
+            // The answer is (16<<3) | (49 & 0b111)
+
+            // Correct message sent from PDC:
+            // [139, 129, 136, 33, 8, 42, 40, 170, 171, 0, 25, 32, 88, 104, 0, 0, 0, 0, 0, 192]
+
+            for val in self.unique_id {
+                bits[i_bit..i_bit + 8].store_le(val);
+                i_bit += 8;
+            }
+
+            // todo: This is still all sorts of screwed up.
+            // result[1] = 129; // todo: Not sure how to get it to come out right using `bitvec`.
+            println!("PL: {:?}", result);
         } else {
             match self.stage {
                 0 => {

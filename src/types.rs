@@ -114,6 +114,12 @@ pub enum NumericValue {
     Real(f32),
 }
 
+impl Default for NumericValue {
+    fn default() -> Self {
+        Self::Empty
+    }
+}
+
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/Value.uavcan
 /// `uavcan.protocol.param.Value`
 /// 3-bit tag with 5-bit prefix for alignment.
@@ -125,6 +131,12 @@ pub enum Value<'a> {
     Boolean(bool), // u8 repr
     /// Max length of 128 bytes.
     String(&'a [u8]),
+}
+
+impl<'a> Default for Value<'a> {
+    fn default() -> Self {
+        Self::Empty
+    }
 }
 
 impl<'a> Value<'a> {
@@ -208,6 +220,7 @@ impl<'a> Value<'a> {
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
+#[derive(Default)]
 pub struct GetSetRequest<'a> {
     pub index: u16, // 13 bits
     /// If set - parameter will be assigned this value, then the new value will be returned.
@@ -279,14 +292,15 @@ impl<'a> GetSetRequest<'a> {
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
+#[derive(Default)]
 pub struct GetSetResponse<'a> {
     /// For set requests, it should contain the actual parameter value after the set request was
     /// executed. The objective is to let the client know if the value could not be updated, e.g.
     /// due to its range violation, etc.
     pub value: Value<'a>,
-    pub default_value: Option<Value<'a>>,
-    pub max_value: Option<NumericValue>,
-    pub min_value: Option<NumericValue>,
+    pub default_value: Value<'a>,
+    pub max_value: NumericValue,
+    pub min_value: NumericValue,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
     pub name: [u8; 20], // large enough for many uses
     pub name_len: usize,
@@ -294,7 +308,8 @@ pub struct GetSetResponse<'a> {
 }
 
 impl<'a> GetSetResponse<'a> {
-    pub fn to_bytes(&self, buf: &mut [u8]) {
+    /// Returns array length in bytes.
+    pub fn to_bytes(&self, buf: &mut [u8]) -> usize {
         let bits = buf.view_bits_mut::<Lsb0>();
 
         let val_tag_start_i = 5; // bits.
@@ -332,13 +347,15 @@ impl<'a> GetSetResponse<'a> {
 
         // todo: DO this.
 
-        let mut i = name_start_i; // bits.
-        bits[i..NAME_LEN_BIT_SIZE].store_le(self.name_len);
-        i += NAME_LEN_BIT_SIZE;
+        let mut i_bits = name_start_i; // bits.
+        bits[i_bits..NAME_LEN_BIT_SIZE].store_le(self.name_len);
+        i_bits += NAME_LEN_BIT_SIZE;
         for char in self.name {
-            bits[i..i + 8].store_le(char);
-            i += 8;
+            bits[i_bits..i_bits + 8].store_le(char);
+            i_bits += 8;
         }
+
+        (i_bits / 8) + 1 // todo: QC and sloppy. Maybe round up.
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
@@ -360,14 +377,14 @@ impl<'a> GetSetResponse<'a> {
             };
 
         // todo: Max, min and default values
-        let default_value = None;
+        let default_value = Value::Empty;
 
         let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
 
-        let max_value = None;
+        let max_value = NumericValue::Empty;
         let max_value_size = 0; // todo
 
-        let min_value = None;
+        let min_value = NumericValue::Empty;
         let min_value_size = 0; // todo
                                 // 2 is tag size of numeric value.
         let min_value_i = max_value_i + 2 + max_value_size + 6;

@@ -117,7 +117,7 @@ impl MsgType {
         // todo: 0 values are ones we haven't implemented yet.
         // todo: Handle when response has a diff payload size!
         match self {
-            Self::IdAllocation => 17, // Includes 16 bytes of unique id. (doesn't need len field)
+            Self::IdAllocation => 19, // Includes 16 bytes of unique id. (Needs a len field for FD mode)
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
             Self::GetNodeInfo => 41,
             Self::GlobalTimeSync => 7,
@@ -125,6 +125,7 @@ impl MsgType {
             Self::Panic => 7, // todo?
             Self::Restart => 5,
             Self::ExecuteOpcode => 0,
+            // We override GetSet's size based on the specific payload
             Self::GetSet => 0,
             Self::NodeStatus => PAYLOAD_SIZE_NODE_STATUS as u8,
             // AHRS solution: Assumes no covariance values. The first 2 cov fields have a 4-bit
@@ -218,6 +219,7 @@ pub static TRANSFER_ID_GLOBAL_TIME_SYNC: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_TRANSPORT_STATS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_PANIC: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_RESTART: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_GET_SET: AtomicUsize = AtomicUsize::new(0);
 
 pub static TRANSFER_ID_AHRS_SOLUTION: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2: AtomicUsize = AtomicUsize::new(0);
@@ -237,7 +239,6 @@ pub static TRANSFER_ID_ARDUPILOT_GNSS_STATUS: AtomicUsize = AtomicUsize::new(0);
 // todo: Impl these Arudpilot-specific types:
 // https://github.com/dronecan/DSDL/tree/master/ardupilot/gnss
 
-pub static TRANSFER_ID_GET_SET: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_ACK: AtomicUsize = AtomicUsize::new(0);
 
 // Static buffers, to ensure they live long enough through transmission. Note; This all include room for a tail byte,
@@ -252,6 +253,8 @@ static mut BUF_NODE_INFO: [u8; 64] = [0; 64];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
+// Rough size that includes enough room for i64 on most values, and a 30-len name field.
+static mut BUF_GET_SET: [u8; 80] = [0; 80];
 
 static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
@@ -260,7 +263,6 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-// todo: Not sure how to handle size for this; 88 bytes.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 
 // This buffer accomodates up to 16 12-bit channels. (195 bits)
@@ -339,16 +341,14 @@ pub fn publish_node_info(
 
     // Important: In legacy mode, there is no node len field for node info, due to tail array
     // optimization; We jump right into the byte representation.
-    // In FD mode, a 7-bit node len field is required. This may be due to a detail in FD, or in
-    // whether the packet is split over multiple bytes. I've submitted a Github issue
-    // to always use byte-len of 1.
+    // In FD mode, a 7-bit node len field is required.
     if fd_mode {
         let bits = buf.view_bits_mut::<Lsb0>();
 
         let mut i_bit = 41 * 8;
-        // Actually, I have no idea. Re the bit shift left here and i_bit += 9.
-        // I am just aping PyDronecan; this is nuts.
-        bits[i_bit..i_bit + 7].store_le((node_name.len()<<1) as u8);
+        // Something mor subtle than adding a 7-bit len field, Re the bit shift left here and
+        // i_bit += 9. I am aping PyDronecan's format.
+        bits[i_bit..i_bit + 7].store_le((node_name.len() <<1 ) as u8);
 
         i_bit += 9;
 
@@ -897,6 +897,37 @@ pub fn request_id_allocation_req(
     broadcast(
         can,
         FrameType::MessageAnon,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        Some(len),
+    )
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
+/// We send this after receiving an (empty) GetSet request. We respond to the parameter
+/// associated with the index requested. If the requested index doesn't match with a parameter
+/// we have, we reply with an empty response. This indicates that we have passed all parameters.
+/// The requester increments the index starting at 0 to poll parameters available.
+pub fn publish_getset_resp(
+    can: &mut crate::Can_,
+    data: &GetSetResponse,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_GET_SET };
+
+    let m_type = MsgType::GetSet;
+
+    let len = data.to_bytes(buf);
+
+    let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
         m_type,
         node_id,
         transfer_id as u8,
