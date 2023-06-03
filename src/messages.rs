@@ -150,7 +150,7 @@ impl MsgType {
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 7,
+            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8,
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 2,
             Self::PositFusedAnyleaf => 36,
