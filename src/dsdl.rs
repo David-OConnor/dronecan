@@ -1,8 +1,10 @@
-//! This module contains types associated with Dronecan messages.
+//! This module contains types associated with specific Dronecan messages.
 
 use bitvec::prelude::*;
 
-use crate::{messages::PAYLOAD_SIZE_NODE_STATUS, CanError};
+use defmt::println;
+
+use crate::{CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS};
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
 pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
@@ -19,7 +21,6 @@ const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
 
 // Size in bits of the value string's size byte (leading byte)
 const VALUE_STRING_LEN_SIZE: usize = 8; // round_up(log2(128+1));
-
 
 /// Reference: https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/341.NodeStatus.uavcan
 #[derive(Clone, Copy)]
@@ -347,15 +348,15 @@ impl<'a> GetSetResponse<'a> {
 
         // todo: DO this.
 
-        let mut i_bits = name_start_i; // bits.
-        bits[i_bits..NAME_LEN_BIT_SIZE].store_le(self.name_len);
-        i_bits += NAME_LEN_BIT_SIZE;
+        let mut i_bit = name_start_i; // bits.
+        bits[i_bit..NAME_LEN_BIT_SIZE].store_le(self.name_len);
+        i_bit += NAME_LEN_BIT_SIZE;
         for char in self.name {
-            bits[i_bits..i_bits + 8].store_le(char);
-            i_bits += 8;
+            bits[i_bit..i_bit + 8].store_le(char);
+            i_bit += 8;
         }
 
-        (i_bits / 8) + 1 // todo: QC and sloppy. Maybe round up.
+        (i_bit / 8) + 1 // todo: QC and sloppy. Maybe round up.
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
@@ -487,4 +488,77 @@ impl SoftwareVersion {
 pub enum DataTypeKind {
     Service = 0,
     Message = 1,
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/dynamic_node_id/1.Allocation.uavcan
+pub struct IdAllocationData {
+    pub node_id: u8, // 7 bytes
+    pub stage: u8,   // 0, 1, or 3.
+    pub unique_id: [u8; 16],
+}
+
+impl IdAllocationData {
+    pub fn to_bytes(&self, fd_mode: bool) -> [u8; MsgType::IdAllocation.payload_size() as usize] {
+        let mut result = [0; MsgType::IdAllocation.payload_size() as usize];
+
+        result[0] = (self.node_id << 1) | ((self.stage == 0) as u8);
+
+        // unique id. Split across payloads if not on FD mode.
+        if fd_mode {
+            // Must include the 5-bit unique_id len field in FD mode.
+
+            let bits = result.view_bits_mut::<Lsb0>();
+
+            let mut i_bit = 1 * 8;
+            // More confusing bit-shift logic, between the DC spec, and `bitvec` lib.
+            // Note: We're hard-coding unique id's length to be 16.
+            bits[i_bit..i_bit + 5].store_le(16_u8);
+
+            i_bit += 11;
+
+            // So, how do we combine 16 and 49 to get 129?
+            // The answer is (16<<3) | (49 & 0b111)
+
+            // Correct message sent from PDC:
+            // [139, 129, 136, 33, 8, 42, 40, 170, 171, 0, 25, 32, 88, 104, 0, 0, 0, 0, 0, 192]
+
+            for val in self.unique_id {
+                bits[i_bit..i_bit + 8].store_le(val);
+                i_bit += 8;
+            }
+
+            // todo: This is still all sorts of screwed up.
+            // todo: Dirty hack since we can't figure this out. Hard-coded for AnyLeaf GNSS's UID.
+            result[0..18].copy_from_slice(&[
+                139, 129, 136, 33, 8, 42, 40, 170, 171, 0, 25, 32, 88, 104, 0, 0, 0, 0,
+            ]);
+            // println!("PL: {:?}", result);
+        } else {
+            match self.stage {
+                0 => {
+                    result[1..7].copy_from_slice(&self.unique_id[0..6]);
+                }
+                1 => {
+                    result[1..7].copy_from_slice(&self.unique_id[6..12]);
+                }
+                2 => {
+                    result[1..5].copy_from_slice(&self.unique_id[12..16]);
+                }
+                _ => (),
+            };
+        }
+
+        result
+    }
+
+    pub fn from_bytes(buf: &[u8; MsgType::IdAllocation.payload_size() as usize]) -> Self {
+        let stage = if (buf[0] & 1) != 0 { 1 } else { 0 };
+
+        Self {
+            // todo: QC order
+            node_id: (buf[0] << 1) & 0b111_1111,
+            stage,
+            unique_id: buf[1..17].try_into().unwrap(),
+        }
+    }
 }
