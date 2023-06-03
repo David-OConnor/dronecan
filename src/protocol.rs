@@ -3,8 +3,6 @@ use core::{
     sync::atomic::Ordering,
 };
 
-use fdcan::{frame::RxFrameInfo, ReceiveOverrun};
-
 #[cfg(feature = "hal")]
 use stm32_hal2::rng;
 
@@ -376,21 +374,6 @@ pub fn get_tail_byte(payload: &[u8], frame_len: u8) -> Result<TailByte, CanError
     }
 
     Ok(TailByte::from_value(payload[i]))
-}
-
-/// Function to help parse the nested result from CAN rx results
-pub fn get_frame_info(
-    rx_result: Result<ReceiveOverrun<RxFrameInfo>, nb::Error<Infallible>>,
-) -> Result<RxFrameInfo, CanError> {
-    // todo: This masks overruns currently.
-
-    match rx_result {
-        Ok(r) => match r {
-            ReceiveOverrun::NoOverrun(frame_info) => Ok(frame_info),
-            ReceiveOverrun::Overrun(frame_info) => Ok(frame_info),
-        },
-        Err(_) => Err(CanError::CanHardware),
-    }
 }
 
 /// Construct a tail byte. See DroneCAN Spec, CAN bus transport layer.

@@ -9,12 +9,10 @@ use packed_struct::PackedStruct;
 use num_traits::float::FloatCore; // to round.
 
 use crate::{
-    broadcast,
     dsdl::{
         self, GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
         NumericValue, SoftwareVersion, Value, PARAM_NAME_NODE_ID,
     },
-    gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
     messages,
     protocol::RequestResponse,
     CanError, FrameType, MsgPriority, ServiceData, PAYLOAD_SIZE_CONFIG_COMMON,
@@ -23,11 +21,11 @@ use crate::{
 
 use half::f16;
 
-use cortex_m;
-
 use bitvec::prelude::*;
 
 use crate::protocol::get_tail_byte;
+
+#[cfg(feature = "hal")]
 use defmt::println;
 
 // #[repr(u16)]

@@ -4,9 +4,9 @@
 use core::sync::atomic::{AtomicUsize, Ordering};
 
 use fdcan::{
+    FdCan,
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id},
-    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
+    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
@@ -18,6 +18,7 @@ use defmt::println;
 use num_traits::float::FloatCore;
 
 use crate::{
+    CanError,
     crc::TransferCrc,
     dsdl::{
         GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
@@ -28,12 +29,12 @@ use crate::{
     make_tail_byte,
     messages::MsgType,
     protocol::{CanId, FrameType, MsgPriority, RequestResponse, ServiceData, TransferComponent},
-    CanError,
 };
 
 use packed_struct::PackedStruct;
 
 use half::f16;
+use core::convert::Infallible;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -1095,4 +1096,19 @@ pub fn handle_restart_request(
 
 fn message_pending_handler(mailbox: Mailbox, header: TxFrameHeader, buf: &[u32]) {
     println!("Mailbox overflow!");
+}
+
+/// Function to help parse the nested result from CAN rx results
+pub fn get_frame_info(
+    rx_result: Result<ReceiveOverrun<RxFrameInfo>, nb::Error<Infallible>>,
+) -> Result<RxFrameInfo, CanError> {
+    // todo: This masks overruns currently.
+
+    match rx_result {
+        Ok(r) => match r {
+            ReceiveOverrun::NoOverrun(frame_info) => Ok(frame_info),
+            ReceiveOverrun::Overrun(frame_info) => Ok(frame_info),
+        },
+        Err(_) => Err(CanError::CanHardware),
+    }
 }

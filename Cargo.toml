@@ -25,7 +25,7 @@ packed_struct = {version = "^0.10.1", default_features = false }
 
 nb = "^1.1.0"  # For use with Fdcan lib's infallible type.
 
-defmt = "0.3.4"
+defmt = {version = "0.3.4", optional = true }
 
 # We use bitvec for serializing and deserializing standard DroneCan DSDL
 # types that use dynamic-sized arrays; these are unable to be tackled by PackedStruct.
@@ -33,7 +33,7 @@ defmt = "0.3.4"
 bitvec = { version = "1.0.1", default-features = false }
 
 [features]
-hal = ["fdcan", "cortex-m", "stm32-hal2"]
+hal = ["fdcan", "cortex-m", "stm32-hal2", "defmt"]
 # g4 = ["fdcan/fdcan_g0_g4_l5",  "stm32-hal2/g431", "stm32-hal2/can_fd_g"]
 # h7 = ["fdcan/fdcan_h7", "stm32-hal2/h743v", "stm32-hal2/can_fd_h"]
 

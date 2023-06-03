@@ -10,7 +10,6 @@ pub struct TransferCrc {
     pub value: u16,
 }
 
-use defmt::println;
 
 impl TransferCrc {
     /// Use `pydronecan` to find each message type's base CRC:

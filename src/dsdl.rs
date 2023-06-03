@@ -2,6 +2,7 @@
 
 use bitvec::prelude::*;
 
+#[cfg(feature = "hal")]
 use defmt::println;
 
 use crate::{CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS};

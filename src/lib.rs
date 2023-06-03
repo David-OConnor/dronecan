@@ -12,8 +12,6 @@ use core::sync::atomic::{self, AtomicBool, AtomicU16, Ordering};
 
 use num_enum::TryFromPrimitive;
 
-use defmt::println;
-
 #[cfg(feature = "hal")]
 pub mod broadcast;
 
@@ -21,14 +19,15 @@ mod crc;
 pub mod dsdl;
 #[cfg(feature = "hal")]
 pub mod gnss;
-#[cfg(feature = "hal")]
 pub mod messages;
 pub mod protocol;
 
 pub use dsdl::*;
-#[cfg(feature = "hal")]
 pub use messages::*;
 pub use protocol::*;
+
+#[cfg(feature = "hal")]
+pub use broadcast::*;
 
 use crate::crc::TransferCrc;
 
