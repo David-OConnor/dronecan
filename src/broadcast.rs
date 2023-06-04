@@ -96,11 +96,12 @@ static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 // Rough size that includes enough room for i64 on most values, and a 30-len name field.
-static mut BUF_GET_SET: [u8; 80] = [0; 80];
+// Includes extra room too.
+static mut BUF_GET_SET: [u8; 100] = [0; 100];
 
 static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
-                                                  // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
-                                                  // Potentially need size 12 for mag strength in FD mode, even with no cov.
+// static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
+// Potentially need size 12 for mag strength in FD mode, even with no cov.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 12] = [0; 12]; // Note: No covariance.
 static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
@@ -414,7 +415,7 @@ pub fn publish_node_info(
     // optimization; We jump right into the byte representation.
     // In FD mode, a 7-bit node len field is required.
     if fd_mode {
-        let bits = buf.view_bits_mut::<Lsb0>();
+        let bits = buf.view_bits_mut::<Msb0>();
 
         let mut i_bit = 41 * 8;
         // Something more subtle is going on than adding a 7-bit len field, Re the bit shift left here and
@@ -643,7 +644,7 @@ pub fn publish_ahrs_solution(
     let lin_acc_y = f16::from_f32(linear_accel[1]);
     let lin_acc_z = f16::from_f32(linear_accel[2]);
 
-    let bits = buf.view_bits_mut::<Lsb0>();
+    let bits = buf.view_bits_mut::<Msb0>();
 
     let mut i = 0;
 
@@ -923,7 +924,7 @@ pub fn publish_rc_input(
     let payload_len =
         ((m_type.payload_size() as f32 + 12. * num_channels as f32) / 8.).ceil() as usize;
 
-    let bits = buf.view_bits_mut::<Lsb0>();
+    let bits = buf.view_bits_mut::<Msb0>();
 
     let mut i_bits = 24; // (u16 + u8 admin data)
     for ch in rc_in {
@@ -997,18 +998,27 @@ pub fn publish_getset_resp(
     data: &GetSetResponse,
     fd_mode: bool,
     node_id: u8,
+    requester_node_id: u8,
 ) -> Result<(), CanError> {
     let buf = unsafe { &mut BUF_GET_SET };
 
+    // //Empty the buffer in case this message is shorter than the previous one; variable length.
+    // *buf = [0; unsafe { BUF_GET_SET.len() }];
+
     let m_type = MsgType::GetSet;
 
-    let len = data.to_bytes(buf);
+    let len = data.to_bytes(buf, fd_mode);
 
     let transfer_id = TRANSFER_ID_GET_SET.fetch_add(1, Ordering::Relaxed);
 
+    let frame_type = FrameType::Service(ServiceData {
+        dest_node_id: requester_node_id,
+        req_or_resp: RequestResponse::Response,
+    });
+
     broadcast(
         can,
-        FrameType::Message,
+        frame_type,
         m_type,
         node_id,
         transfer_id as u8,

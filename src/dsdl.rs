@@ -1,5 +1,6 @@
 //! This module contains types associated with specific Dronecan messages.
 
+use bitvec::macros::internal::funty::Numeric;
 use bitvec::prelude::*;
 
 #[cfg(feature = "hal")]
@@ -17,6 +18,7 @@ pub const PARAM_NAME_PUBLICATION_PERIOD: &'static str = "uavcan.pubp-";
 // Used to determine which enum (union) variant is used.
 // "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"
 const VALUE_TAG_BIT_LEN: usize = 3;
+const VALUE_NUMERIC_TAG_BIT_LEN: usize = 2;
 // For use in `GetSet`
 const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
 
@@ -122,6 +124,36 @@ impl Default for NumericValue {
     }
 }
 
+impl NumericValue {
+    fn tag(&self) -> u8 {
+        match self {
+            Self::Empty => 0,
+            Self::Integer(_) => 1,
+            Self::Real(_) => 2,
+        }
+    }
+
+    /// Similar to `Value.to_bits()`.
+    pub fn to_bits(&self, bits: &mut BitSlice<u8, Msb0>, tag_start_i: usize) -> usize {
+        let val_start_i = tag_start_i + VALUE_NUMERIC_TAG_BIT_LEN; // bits
+        bits[tag_start_i..val_start_i].store(self.tag());
+
+        match self {
+            Self::Empty => val_start_i,
+            Self::Integer(v) => {
+                bits[val_start_i..val_start_i + 64].store_le(*v);
+                val_start_i + 64
+            }
+            Self::Real(v) => {
+                // bitvec doesn't support floats.
+                let v_u32 = u32::from_le_bytes(v.to_le_bytes());
+                bits[val_start_i..val_start_i + 32].store_le(v_u32);
+                val_start_i + 32
+            }
+        }
+    }
+}
+
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/Value.uavcan
 /// `uavcan.protocol.param.Value`
 /// 3-bit tag with 5-bit prefix for alignment.
@@ -153,22 +185,30 @@ impl<'a> Value<'a> {
     }
 
     /// Modifies a bit array in place, with content from this value.
-    pub fn to_bits(&self, bits: &mut BitSlice<u8>, tag_start_i: usize) {
+    /// Returns current bit index.
+    pub fn to_bits(&self, bits: &mut BitSlice<u8, Msb0>, tag_start_i: usize) -> usize {
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN; // bits
         bits[tag_start_i..val_start_i].store(self.tag());
 
+        // success value of pdc msg for node id w min and max
+        // [78, 111, 100, 101, 32, 73, 68, 67]
+        // or is it this: [31, 15, 1, 70, 0, 0, 0, 131, 0]
+
         match self {
-            Self::Empty => (),
+            Self::Empty => val_start_i,
             Self::Integer(v) => {
                 bits[val_start_i..val_start_i + 64].store_le(*v);
+                val_start_i + 64
             }
             Self::Real(v) => {
                 // bitvec doesn't support floats.
                 let v_u32 = u32::from_le_bytes(v.to_le_bytes());
                 bits[val_start_i..val_start_i + 32].store_le(v_u32);
+                val_start_i + 32
             }
             Self::Boolean(v) => {
                 bits[val_start_i..val_start_i + 8].store_le(*v as u8);
+                val_start_i + 8
             }
             Self::String(v) => {
                 let mut i = val_start_i;
@@ -178,28 +218,30 @@ impl<'a> Value<'a> {
                     bits[i..i + 8].store_le(*char);
                     i += 8;
                 }
+                i
             }
         }
     }
 
     /// Converts from a bit array, eg one of a larger message. Anchors using bit indexes
     /// passed as arguments.
+    /// Returns self, and current bit index.
     pub fn from_bits(
-        bits: &BitSlice<u8>,
+        bits: &BitSlice<u8, Msb0>,
         tag_start_i: usize,
         str_buf: &'a mut [u8],
-    ) -> Result<Self, CanError> {
+    ) -> Result<(Self, usize), CanError> {
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN;
 
         Ok(match bits[tag_start_i..val_start_i].load_le::<u8>() {
-            0 => Self::Empty,
-            1 => Self::Integer(bits[val_start_i..val_start_i + 64].load_le::<i64>()),
+            0 => (Self::Empty, val_start_i),
+            1 => (Self::Integer(bits[val_start_i..val_start_i + 64].load_le::<i64>()), val_start_i + 64),
             2 => {
                 // No support for floats in bitvec.
                 let as_u32 = bits[val_start_i..val_start_i + 32].load_le::<u32>();
-                Self::Real(f32::from_le_bytes(as_u32.to_le_bytes()))
+                (Self::Real(f32::from_le_bytes(as_u32.to_le_bytes())), val_start_i + 32)
             }
-            3 => Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0),
+            3 => (Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0), val_start_i + 8),
             4 => {
                 let mut i = val_start_i;
                 let str_len = bits[i..VALUE_STRING_LEN_SIZE].load_le::<u8>();
@@ -214,7 +256,7 @@ impl<'a> Value<'a> {
                     i += 8;
                 }
 
-                Self::String(str_buf)
+                (Self::String(str_buf), i)
             }
             _ => return Err(CanError::PayloadData),
         })
@@ -230,7 +272,7 @@ pub struct GetSetRequest<'a> {
     pub value: Value<'a>,
     // pub name: &'a [u8], // up to 92 bytes.
     /// Name of the parameter; always preferred over index if nonempty.
-    pub name: [u8; 20], // large enough for many uses
+    pub name: [u8; 30], // large enough for many uses
     pub name_len: usize,
 }
 
@@ -244,44 +286,37 @@ impl<'a> GetSetRequest<'a> {
     //     }
     // }
 
-    pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
-        let bits = buf.view_bits::<Lsb0>();
+    pub fn from_bytes(buf: &[u8], fd_mode: bool) -> Result<Self, CanError> {
+        let bits = buf.view_bits::<Msb0>();
 
         let index = bits[0..13].load_le::<u16>();
 
-        // `i` in this function is in bits, not bytes, as we use elsewhere.
-
+        // `i` in this function is in bits, not bytes.
         let value_start_i = 13;
-        let value = Value::from_bits(bits, value_start_i, &mut [])?; // todo: t str buf
 
-        let name_len_i = value_start_i
-            + VALUE_TAG_BIT_LEN
-            + match value {
-                Value::Empty => 0,
-                Value::Integer(_) => 64,
-                Value::Real(_) => 32,
-                Value::Boolean(_) => 8,
-                // todo: Hard-coded for node id; Breaks if the string len is different.
-                Value::String(_) => VALUE_STRING_LEN_SIZE + PARAM_NAME_NODE_ID.len() * 8,
-            };
+        let mut value_buf = [0; 30];
+        // let (value, mut current_i) = Value::from_bits(bits, value_start_i, &mut value_buf)?;
+        let (value, mut current_i) = Value::from_bits(bits, value_start_i, &mut [])?; // todo: Sort out lifetime issues.
 
-        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+        let name_len = if fd_mode {
+            let v = bits[current_i..current_i + NAME_LEN_BIT_SIZE].load_le::<u8>() as usize;
+            current_i += NAME_LEN_BIT_SIZE;
+            v
+        } else {
+            69 // todo: Figure this out, ie TCO.
+        };
 
-        let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
+        let mut name = [0; 30];
 
-        let mut name = [0; 20];
-
-        let mut i = value_start_i; // bits.
-
-        i += VALUE_STRING_LEN_SIZE;
+        current_i += VALUE_STRING_LEN_SIZE;
 
         if name_len as usize > name.len() {
             return Err(CanError::PayloadData);
         }
 
         for char_i in 0..name_len {
-            name[char_i] = bits[i..i + 8].load_le::<u8>();
-            i += 8;
+            name[char_i] = bits[current_i..current_i + 8].load_le::<u8>();
+            current_i += 8;
         }
 
         Ok(Self {
@@ -304,124 +339,105 @@ pub struct GetSetResponse<'a> {
     pub max_value: NumericValue,
     pub min_value: NumericValue,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
-    pub name: [u8; 20], // large enough for many uses
+    pub name: [u8; 30], // large enough for many uses
     pub name_len: usize,
     // pub name: &'a [u8], // up to 92 bytes.
 }
 
 impl<'a> GetSetResponse<'a> {
     /// Returns array length in bytes.
-    pub fn to_bytes(&self, buf: &mut [u8]) -> usize {
-        let bits = buf.view_bits_mut::<Lsb0>();
+    pub fn to_bytes(&self, buf: &mut [u8], fd_mode: bool) -> usize {
+        let bits = buf.view_bits_mut::<Msb0>();
 
         let val_tag_start_i = 5; // bits.
 
-        self.value.to_bits(bits, val_tag_start_i);
-
-        // todo here for the optional fields with `from_bytes`.
+        let current_i = self.value.to_bits(bits, val_tag_start_i);
 
         // 5 is the pad between `value` and `default_value`.
-        let default_value_i = val_tag_start_i
-            + VALUE_TAG_BIT_LEN
-            + 5
-            + match self.value {
-                Value::Empty => 0,
-                Value::Integer(_) => 64,
-                Value::Real(_) => 32,
-                Value::Boolean(_) => 8,
-                // todo: Hard-coded for node id; Breaks if the string len is different.
-                Value::String(_) => VALUE_STRING_LEN_SIZE + PARAM_NAME_NODE_ID.len() * 8,
-            };
+        let default_value_i = current_i + 5;
 
-        let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+        let current_i = self.default_value.to_bits(bits, default_value_i);
+        let max_value_i = current_i + 6;
 
-        let max_value_size = 0; // todo
+        let current_i = self.max_value.to_bits(bits, max_value_i);
+        let min_value_i = current_i + 6;
 
-        let min_value_size = 0; // todo
-                                // 2 is tag size of numeric value.
-        let min_value_i = max_value_i + 2 + max_value_size + 6;
+        let current_i = self.min_value.to_bits(bits, min_value_i);
 
-        // todo: Update once you include default values.
-        let name_len_i = min_value_i + 2 + min_value_size + 6;
+        // In FD mode, we need the len field of name.
+        let mut i_bit = if fd_mode {
+            let mut i_bit = current_i; // bits.
 
-        // todo: Name section here is DRY with request.
-        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+            bits[i_bit..i_bit + NAME_LEN_BIT_SIZE].store_le(self.name_len);
+            i_bit += NAME_LEN_BIT_SIZE;
 
-        // todo: DO this.
+            i_bit
+        } else {
+            current_i
+        };
 
-        let mut i_bit = name_start_i; // bits.
-        bits[i_bit..NAME_LEN_BIT_SIZE].store_le(self.name_len);
-        i_bit += NAME_LEN_BIT_SIZE;
         for char in self.name {
             bits[i_bit..i_bit + 8].store_le(char);
             i_bit += 8;
         }
 
-        (i_bit / 8) + 1 // todo: QC and sloppy. Maybe round up.
+        // Todo: If this is exactly divisible by 8, this returns a len 1 too long.
+        (i_bit / 8) + 1
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
-        let bits = buf.view_bits::<Lsb0>();
+        let bits = buf.view_bits::<Msb0>();
 
-        let val_tag_start_i = 5;
-        let value = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
-
-        // 5 is the pad between `value` and `default_value`.
-        let default_value_i = val_tag_start_i
-            + VALUE_TAG_BIT_LEN
-            + 5
-            + match value {
-                Value::Empty => 0,
-                Value::Integer(_) => 64,
-                Value::Real(_) => 32,
-                Value::Boolean(_) => 8,
-                Value::String(_) => 0, // todo
-            };
-
-        // todo: Max, min and default values
-        let default_value = Value::Empty;
-
-        let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
-
-        let max_value = NumericValue::Empty;
-        let max_value_size = 0; // todo
-
-        let min_value = NumericValue::Empty;
-        let min_value_size = 0; // todo
-                                // 2 is tag size of numeric value.
-        let min_value_i = max_value_i + 2 + max_value_size + 6;
-
-        // todo: Update once you include default values.
-        let name_len_i = min_value_i + 2 + min_value_size + 6;
-
-        // todo: Name section here is DRY with request.
-        let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
-
-        let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
-
-        let mut name = [0; 20];
-
-        let mut i = name_start_i; // bits.
-
-        i += VALUE_STRING_LEN_SIZE;
-
-        if name_len as usize > name.len() {
-            return Err(CanError::PayloadData);
-        }
-
-        for char_i in 0..name_len {
-            name[char_i] = bits[i..i + 8].load_le::<u8>();
-            i += 8;
-        }
-
-        Ok(Self {
-            value,
-            default_value,
-            max_value,
-            min_value,
-            name,
-            name_len,
-        })
+        return unimplemented!(); // todo: You just need to work thorugh it like with related.
+        //
+        // let val_tag_start_i = 5;
+        // let (value, current_i) = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
+        //
+        //
+        // // todo: Max, min and default values
+        // let default_value = Value::Empty;
+        //
+        // let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+        //
+        // let max_value = NumericValue::Empty;
+        // let max_value_size = 0; // todo
+        //
+        // let min_value = NumericValue::Empty;
+        // let min_value_size = 0; // todo
+        // // 2 is tag size of numeric value.
+        // let min_value_i = max_value_i + 2 + max_value_size + 6;
+        //
+        // // todo: Update once you include default values.
+        // let name_len_i = min_value_i + 2 + min_value_size + 6;
+        //
+        // // todo: Name section here is DRY with request.
+        // let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+        //
+        // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
+        //
+        // let mut name = [0; 30];
+        //
+        // let mut i = name_start_i; // bits.
+        //
+        // i += VALUE_STRING_LEN_SIZE;
+        //
+        // if name_len as usize > name.len() {
+        //     return Err(CanError::PayloadData);
+        // }
+        //
+        // for char_i in 0..name_len {
+        //     name[char_i] = bits[i..i + 8].load_le::<u8>();
+        //     i += 8;
+        // }
+        //
+        // Ok(Self {
+        //     value,
+        //     default_value,
+        //     max_value,
+        //     min_value,
+        //     name,
+        //     name_len,
+        // })
     }
 }
 
@@ -508,32 +524,17 @@ impl IdAllocationData {
         if fd_mode {
             // Must include the 5-bit unique_id len field in FD mode.
 
-            let bits = result.view_bits_mut::<Lsb0>();
+            let bits = result.view_bits_mut::<Msb0>();
 
             let mut i_bit = 1 * 8;
-            // More confusing bit-shift logic, between the DC spec, and `bitvec` lib.
-            // Note: We're hard-coding unique id's length to be 16.
             bits[i_bit..i_bit + 5].store_le(16_u8);
 
-            i_bit += 11;
-
-            // So, how do we combine 16 and 49 to get 129?
-            // The answer is (16<<3) | (49 & 0b111)
-
-            // Correct message sent from PDC:
-            // [139, 129, 136, 33, 8, 42, 40, 170, 171, 0, 25, 32, 88, 104, 0, 0, 0, 0, 0, 192]
+            i_bit += 5;
 
             for val in self.unique_id {
                 bits[i_bit..i_bit + 8].store_le(val);
                 i_bit += 8;
             }
-
-            // todo: This is still all sorts of screwed up.
-            // todo: Dirty hack since we can't figure this out. Hard-coded for AnyLeaf GNSS's UID.
-            result[0..18].copy_from_slice(&[
-                139, 129, 136, 33, 8, 42, 40, 170, 171, 0, 25, 32, 88, 104, 0, 0, 0, 0,
-            ]);
-            // println!("PL: {:?}", result);
         } else {
             match self.stage {
                 0 => {
