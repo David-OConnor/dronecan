@@ -38,18 +38,7 @@ use core::convert::Infallible;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
-// This is a GetSet response. Very messy due to variable-size fields in the middle.
-// pads: 5 + 5 + 6 + 6 = 22
-// values (Integer + empty): 3 + 64 + 3 + 0 = 70
-// Default values (empty): 2 + 2 = 4
-// name: 14
-//
-// 110/8 = 13.75
-// pub const PAYLOAD_SIZE_CAN_ID_RESP: usize = 14;
-
-static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 10] = [
-    [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64], [0; 64],
-];
+static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 20] = [[0; 64]; 20];
 
 const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
@@ -95,9 +84,9 @@ static mut BUF_NODE_INFO: [u8; 64] = [0; 64];
 static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
-// Rough size that includes enough room for i64 on most values, and a 30-len name field.
+// Rough size that includes enough room for i64 on most values, and a 40-len name field.
 // Includes extra room too.
-static mut BUF_GET_SET: [u8; 100] = [0; 100];
+static mut BUF_GET_SET: [u8; 110] = [0; 110];
 
 static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
 // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
@@ -418,11 +407,8 @@ pub fn publish_node_info(
         let bits = buf.view_bits_mut::<Msb0>();
 
         let mut i_bit = 41 * 8;
-        // Something more subtle is going on than adding a 7-bit len field, Re the bit shift left here and
-        // i_bit += 9. I am aping PyDronecan's format.
-        bits[i_bit..i_bit + 7].store_le((node_name.len() << 1) as u8);
-
-        i_bit += 9;
+        bits[i_bit..i_bit + 7].store_le(node_name.len() as u8);
+        i_bit += 7;
 
         for char in node_name {
             bits[i_bit..i_bit + 8].store_le(*char);
@@ -438,9 +424,6 @@ pub fn publish_node_info(
         dest_node_id: requester_node_id,
         req_or_resp: RequestResponse::Response,
     });
-    //
-    // println!("NInfo pl: {}", buf);
-    // println!("Node info pl len: {:?}", m_type.payload_size() as usize + node_name.len());
 
     broadcast(
         can,

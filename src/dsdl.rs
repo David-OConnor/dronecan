@@ -1,12 +1,11 @@
 //! This module contains types associated with specific Dronecan messages.
 
-use bitvec::macros::internal::funty::Numeric;
 use bitvec::prelude::*;
 
 #[cfg(feature = "hal")]
 use defmt::println;
 
-use crate::{CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS};
+use crate::{CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS, protocol::ConfigCommon};
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
 pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
@@ -21,6 +20,8 @@ const VALUE_TAG_BIT_LEN: usize = 3;
 const VALUE_NUMERIC_TAG_BIT_LEN: usize = 2;
 // For use in `GetSet`
 const NAME_LEN_BIT_SIZE: usize = 7; // round_up(log2(92+1));
+
+const MAX_GET_SET_NAME_LEN: usize = 50; // not overal max; max we use to keep buf size down
 
 // Size in bits of the value string's size byte (leading byte)
 const VALUE_STRING_LEN_SIZE: usize = 8; // round_up(log2(128+1));
@@ -229,7 +230,6 @@ impl<'a> Value<'a> {
     pub fn from_bits(
         bits: &BitSlice<u8, Msb0>,
         tag_start_i: usize,
-        str_buf: &'a mut [u8],
     ) -> Result<(Self, usize), CanError> {
         let val_start_i = tag_start_i + VALUE_TAG_BIT_LEN;
 
@@ -243,20 +243,13 @@ impl<'a> Value<'a> {
             }
             3 => (Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0), val_start_i + 8),
             4 => {
-                let mut i = val_start_i;
-                let str_len = bits[i..VALUE_STRING_LEN_SIZE].load_le::<u8>();
-                i += VALUE_STRING_LEN_SIZE;
+                // todo: Handle non-FD mode that uses TCO
+                let current_i = val_start_i + VALUE_STRING_LEN_SIZE;
+                let str_len: u8 = bits[val_start_i..current_i].load_le();
 
-                if str_len as usize > str_buf.len() {
-                    return Err(CanError::PayloadData);
-                }
-
-                for char_i in 0..str_len as usize {
-                    str_buf[char_i] = bits[i..i + 8].load_le::<u8>();
-                    i += 8;
-                }
-
-                (Self::String(str_buf), i)
+                unimplemented!()
+                // todo: Need to convert bitslice to byte slice.
+                // (Self::String(bits[current_i..current_i + str_len as usize * 8]), current_i)
             }
             _ => return Err(CanError::PayloadData),
         })
@@ -264,7 +257,6 @@ impl<'a> Value<'a> {
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
-#[derive(Default)]
 pub struct GetSetRequest<'a> {
     pub index: u16, // 13 bits
     /// If set - parameter will be assigned this value, then the new value will be returned.
@@ -272,7 +264,7 @@ pub struct GetSetRequest<'a> {
     pub value: Value<'a>,
     // pub name: &'a [u8], // up to 92 bytes.
     /// Name of the parameter; always preferred over index if nonempty.
-    pub name: [u8; 30], // large enough for many uses
+    pub name: [u8; MAX_GET_SET_NAME_LEN], // large enough for many uses
     pub name_len: usize,
 }
 
@@ -289,26 +281,22 @@ impl<'a> GetSetRequest<'a> {
     pub fn from_bytes(buf: &[u8], fd_mode: bool) -> Result<Self, CanError> {
         let bits = buf.view_bits::<Msb0>();
 
-        let index = bits[0..13].load_le::<u16>();
+        let tag_start_i = 13;
+        let index: u16 = bits[0..tag_start_i].load_le();
 
         // `i` in this function is in bits, not bytes.
-        let value_start_i = 13;
-
-        let mut value_buf = [0; 30];
-        // let (value, mut current_i) = Value::from_bits(bits, value_start_i, &mut value_buf)?;
-        let (value, mut current_i) = Value::from_bits(bits, value_start_i, &mut [])?; // todo: Sort out lifetime issues.
+        let (value, mut current_i) = Value::from_bits(bits, tag_start_i)?;
 
         let name_len = if fd_mode {
             let v = bits[current_i..current_i + NAME_LEN_BIT_SIZE].load_le::<u8>() as usize;
             current_i += NAME_LEN_BIT_SIZE;
             v
         } else {
-            69 // todo: Figure this out, ie TCO.
+            // todo: Figure it out from message len, or infer from 0s.
+            50 // max name len we use
         };
 
-        let mut name = [0; 30];
-
-        current_i += VALUE_STRING_LEN_SIZE;
+        let mut name = [0; MAX_GET_SET_NAME_LEN];
 
         if name_len as usize > name.len() {
             return Err(CanError::PayloadData);
@@ -329,7 +317,6 @@ impl<'a> GetSetRequest<'a> {
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/param/11.GetSet.uavcan
-#[derive(Default)]
 pub struct GetSetResponse<'a> {
     /// For set requests, it should contain the actual parameter value after the set request was
     /// executed. The objective is to let the client know if the value could not be updated, e.g.
@@ -339,7 +326,7 @@ pub struct GetSetResponse<'a> {
     pub max_value: NumericValue,
     pub min_value: NumericValue,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
-    pub name: [u8; 30], // large enough for many uses
+    pub name: [u8; MAX_GET_SET_NAME_LEN], // large enough for many uses
     pub name_len: usize,
     // pub name: &'a [u8], // up to 92 bytes.
 }
@@ -415,7 +402,7 @@ impl<'a> GetSetResponse<'a> {
         //
         // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
         //
-        // let mut name = [0; 30];
+        // let mut name = [0; MAX_GET_SET_NAME_LEN];
         //
         // let mut i = name_start_i; // bits.
         //
@@ -523,7 +510,6 @@ impl IdAllocationData {
         // unique id. Split across payloads if not on FD mode.
         if fd_mode {
             // Must include the 5-bit unique_id len field in FD mode.
-
             let bits = result.view_bits_mut::<Msb0>();
 
             let mut i_bit = 1 * 8;
@@ -562,5 +548,69 @@ impl IdAllocationData {
             stage,
             unique_id: buf[1..17].try_into().unwrap(),
         }
+    }
+}
+
+/// Make a GetSet response from common config items. This reduces repetition in node firmware.
+pub fn make_getset_response_common<'a>(config: &ConfigCommon, index: u8) -> Option<GetSetResponse<'a>> {
+    // We load the default config to determine default values.
+    let cfg_default = ConfigCommon::default();
+
+    let mut name = [0; MAX_GET_SET_NAME_LEN];
+
+    match index {
+        0 => {
+            let text = "Node ID (desired if dynamic allocation is set)";
+            name[0..text.len()].copy_from_slice(text.as_bytes());
+
+            Some(GetSetResponse {
+                value: Value::Integer(config.node_id as i64),
+                default_value: Value::Integer(cfg_default.node_id as i64),
+                max_value: NumericValue::Integer(127),
+                min_value: NumericValue::Integer(0),
+                name,
+                name_len: text.len(),
+            })
+        }
+        1 => {
+            let text = "Dynamic ID allocation";
+            name[0..text.len()].copy_from_slice(text.as_bytes());
+
+            Some(GetSetResponse {
+                value: Value::Boolean(config.dynamic_id_allocation),
+                default_value: Value::Boolean(cfg_default.dynamic_id_allocation),
+                max_value: NumericValue::Empty,
+                min_value: NumericValue::Empty,
+                name,
+                name_len: text.len(),
+            })
+        }
+        2 => {
+            let text = "FD enabled";
+            name[0..text.len()].copy_from_slice(text.as_bytes());
+
+            Some(GetSetResponse {
+                value: Value::Boolean(config.fd_mode),
+                default_value: Value::Boolean(cfg_default.fd_mode),
+                max_value: NumericValue::Empty,
+                min_value: NumericValue::Empty,
+                name,
+                name_len: text.len(),
+            })
+        }
+        3 => {
+            let text = "Bitrate (see datasheet)";
+            name[0..text.len()].copy_from_slice(text.as_bytes());
+
+            Some(GetSetResponse {
+                value: Value::Integer(config.can_bitrate as i64),
+                default_value: Value::Integer(cfg_default.can_bitrate as i64),
+                max_value: NumericValue::Integer(6),
+                min_value: NumericValue::Integer(0),
+                name,
+                name_len: text.len(),
+            })
+        }
+        _ => None,
     }
 }
