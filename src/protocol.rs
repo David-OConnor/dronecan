@@ -6,7 +6,7 @@ use core::{
 #[cfg(feature = "hal")]
 use stm32_hal2::rng;
 
-use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
+use crate::{broadcast, CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
 
 /// This includes configuration data that we use on all nodes, and is not part of the official
 /// DroneCAN spec.
@@ -415,4 +415,89 @@ pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> 
         toggle,
         transfer_id,
     }
+}
+
+pub fn load_multi_frame_rx_frame(rx_buf: &[u8], fd_mode: bool) {
+    let frame_i = broadcast::RX_FRAME_I.fetch_add(1, Ordering::Relaxed);
+
+    let frame_len = if fd_mode {
+        broadcast::DATA_FRAME_MAX_LEN_FD
+    } else {
+        broadcast::DATA_FRAME_MAX_LEN_LEGACY
+    } as usize;
+
+    // Determine if this is the final frame using the tail byte, and mark as complete if so.
+    if rx_buf[frame_len - 1] == 0 {
+        // Potentially last frame; tail byte will be at the last non-zero index.
+        for i2 in 0..frame_len {
+            let i3 = (frame_len - 1) - i2;
+            if rx_buf[i3] != 0 {
+                // let tail_byte = TailByte::from_value(rx_buf[i3 - 1]);
+                // if tail_byte.end_of_transfer {
+                broadcast::RX_FRAME_COMPLETE.store(true, Ordering::Release);
+                // }
+            }
+        }
+    } else {
+        let tail_byte = TailByte::from_value(rx_buf[frame_len - 1]);
+        if tail_byte.end_of_transfer {
+            broadcast::RX_FRAME_COMPLETE.store(true, Ordering::Release);
+        }
+    }
+    unsafe {
+        broadcast::MULTI_FRAME_BUFS_RX[frame_i][..frame_len].copy_from_slice(&rx_buf[..frame_len]);
+    }
+}
+
+/// Create a payload from multiple frame buffers. Resets the frame i.
+/// Do this after the final frame as been received.
+// pub fn payload_from_frames(frame_bufs: &[&[u8]], payload: &mut [u8], fd_mode: bool)  {
+pub fn payload_from_frames(payload: &mut [u8], fd_mode: bool) {
+    // Note: A more flexible API would allow passing in frame bufs instead of pointing
+    // to ours directly. See above commentd-out fn signature.
+    let frame_bufs = &mut unsafe { broadcast::MULTI_FRAME_BUFS_RX };
+
+    // Resets the storing index for the next multi-frame payload.
+    broadcast::RX_FRAME_I.store(0, Ordering::Release);
+    broadcast::RX_FRAME_COMPLETE.store(false, Ordering::Release);
+
+    let mut payload_i = 0;
+
+    let tail_byte_i = if fd_mode {
+        broadcast::DATA_FRAME_MAX_LEN_FD - 1
+    } else {
+        broadcast::DATA_FRAME_MAX_LEN_LEGACY - 1
+    } as usize;
+
+    // todo: This currently does not verify CRC.
+    for (frame_i, frame_buf) in frame_bufs.iter().enumerate() {
+        let mut frame_empty = true;
+
+        for (word_i, word) in frame_buf.iter().enumerate() {
+            if payload_i >= payload.len() - 1 {
+                break;
+            }
+
+            if *word != 0 {
+                frame_empty = false;
+            }
+
+            // the first two bytes are the CRC; not part of the payload.
+            // The last in each frame (except for the last frame) is the tail byte.
+            if (frame_i == 0 && (word_i == 0 || word_i == 1)) || word_i == tail_byte_i {
+                continue;
+            }
+
+            payload[payload_i] = *word;
+            payload_i += 1;
+        }
+
+        if frame_empty {
+            // todo: WTH; still getting problems.
+            break;
+        }
+    }
+
+    // Zero-out for next use.
+    *frame_bufs = [[0; 64]; 20];
 }

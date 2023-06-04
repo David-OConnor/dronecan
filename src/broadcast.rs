@@ -1,12 +1,12 @@
 //! This module contains code related to broadcasting messages over CAN.
 //! It is hard-coded to work with our HAL.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use fdcan::{
-    FdCan,
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
-    id::{ExtendedId, Id}, Mailbox, NormalOperationMode, ReceiveOverrun,
+    id::{ExtendedId, Id},
+    FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
 use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
@@ -18,7 +18,6 @@ use defmt::println;
 use num_traits::float::FloatCore;
 
 use crate::{
-    CanError,
     crc::TransferCrc,
     dsdl::{
         GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
@@ -29,19 +28,28 @@ use crate::{
     make_tail_byte,
     messages::MsgType,
     protocol::{CanId, FrameType, MsgPriority, RequestResponse, ServiceData, TransferComponent},
+    CanError,
 };
 
 use packed_struct::PackedStruct;
 
-use half::f16;
 use core::convert::Infallible;
+use half::f16;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
-static mut MULTI_FRAME_BUFS_FD: [[u8; 64]; 20] = [[0; 64]; 20];
+// Note: These are only capable of handling one message at a time. This is especially notable
+// for reception.
+static mut MULTI_FRAME_BUFS_TX: [[u8; 64]; 20] = [[0; 64]; 20];
 
-const DATA_FRAME_MAX_LEN_FD: u8 = 64;
-const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
+// This one may be accessed by applications directly.
+pub static mut MULTI_FRAME_BUFS_RX: [[u8; 64]; 20] = [[0; 64]; 20];
+// Used to identify the next frame to load.
+pub static RX_FRAME_I: AtomicUsize = AtomicUsize::new(0);
+pub static RX_FRAME_COMPLETE: AtomicBool = AtomicBool::new(false);
+
+pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
+pub(crate) const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
 
 pub static TRANSFER_ID_ID_ALLOCATION: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_NODE_INFO: AtomicUsize = AtomicUsize::new(0);
@@ -89,8 +97,8 @@ static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 static mut BUF_GET_SET: [u8; 110] = [0; 110];
 
 static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
-// static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
-// Potentially need size 12 for mag strength in FD mode, even with no cov.
+                                                  // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
+                                                  // Potentially need size 12 for mag strength in FD mode, even with no cov.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 12] = [0; 12]; // Note: No covariance.
 static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
@@ -177,7 +185,7 @@ fn send_multiple_frames(
     crc.add_payload(payload, payload_len as usize, frame_payload_len);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
-    let bufs = unsafe { &mut MULTI_FRAME_BUFS_FD };
+    let bufs = unsafe { &mut MULTI_FRAME_BUFS_RX };
 
     // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
     // "Multi-frame transfer" re requirements such as CRC and Toggle bit.
@@ -205,14 +213,7 @@ fn send_multiple_frames(
         fd_mode,
     )?;
 
-    // println!("\nWHOle payload: {:?}", payload);
-
-    // println!("\n\nFirst frame");
-    // println!("PL this frame: {}", payload_len_this_frame);
-    // println!("Latest sent i: {}", -1);
-
     let mut latest_i_sent = payload_len_this_frame - 1;
-    // println!("Payload: {:?}", bufs[active_frame][..frame_payload_len]);
 
     active_frame += 1;
 
@@ -236,8 +237,6 @@ fn send_multiple_frames(
 
         let tail_byte_i = find_tail_byte_index(payload_len_this_frame as u8);
         bufs[active_frame][tail_byte_i] = tail_byte.value();
-
-        // println!("Payload: {:?}", bufs[active_frame][..frame_payload_len]);
 
         // todo: You may need to cut the active fram eoff early for the last frame.
         can_send(

@@ -10,7 +10,6 @@ pub struct TransferCrc {
     pub value: u16,
 }
 
-
 impl TransferCrc {
     /// Use `pydronecan` to find each message type's base CRC:
     /// `dronecan.DATATYPES[(message_type_id, 1 or 0)].base_crc`

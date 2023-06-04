@@ -5,7 +5,7 @@ use bitvec::prelude::*;
 #[cfg(feature = "hal")]
 use defmt::println;
 
-use crate::{CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS, protocol::ConfigCommon};
+use crate::{protocol::ConfigCommon, CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS};
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
 pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
@@ -235,19 +235,30 @@ impl<'a> Value<'a> {
 
         Ok(match bits[tag_start_i..val_start_i].load_le::<u8>() {
             0 => (Self::Empty, val_start_i),
-            1 => (Self::Integer(bits[val_start_i..val_start_i + 64].load_le::<i64>()), val_start_i + 64),
+            1 => (
+                Self::Integer(bits[val_start_i..val_start_i + 64].load_le::<i64>()),
+                val_start_i + 64,
+            ),
             2 => {
                 // No support for floats in bitvec.
                 let as_u32 = bits[val_start_i..val_start_i + 32].load_le::<u32>();
-                (Self::Real(f32::from_le_bytes(as_u32.to_le_bytes())), val_start_i + 32)
+                (
+                    Self::Real(f32::from_le_bytes(as_u32.to_le_bytes())),
+                    val_start_i + 32,
+                )
             }
-            3 => (Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0), val_start_i + 8),
+            3 => (
+                Self::Boolean(bits[val_start_i..val_start_i + 8].load_le::<u8>() != 0),
+                val_start_i + 8,
+            ),
             4 => {
                 // todo: Handle non-FD mode that uses TCO
                 let current_i = val_start_i + VALUE_STRING_LEN_SIZE;
                 let str_len: u8 = bits[val_start_i..current_i].load_le();
 
-                unimplemented!()
+                // todo: WTH?
+                (Self::Integer(69), val_start_i + 64)
+                // unimplemented!()
                 // todo: Need to convert bitslice to byte slice.
                 // (Self::String(bits[current_i..current_i + str_len as usize * 8]), current_i)
             }
@@ -376,55 +387,55 @@ impl<'a> GetSetResponse<'a> {
         let bits = buf.view_bits::<Msb0>();
 
         return unimplemented!(); // todo: You just need to work thorugh it like with related.
-        //
-        // let val_tag_start_i = 5;
-        // let (value, current_i) = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
-        //
-        //
-        // // todo: Max, min and default values
-        // let default_value = Value::Empty;
-        //
-        // let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
-        //
-        // let max_value = NumericValue::Empty;
-        // let max_value_size = 0; // todo
-        //
-        // let min_value = NumericValue::Empty;
-        // let min_value_size = 0; // todo
-        // // 2 is tag size of numeric value.
-        // let min_value_i = max_value_i + 2 + max_value_size + 6;
-        //
-        // // todo: Update once you include default values.
-        // let name_len_i = min_value_i + 2 + min_value_size + 6;
-        //
-        // // todo: Name section here is DRY with request.
-        // let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
-        //
-        // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
-        //
-        // let mut name = [0; MAX_GET_SET_NAME_LEN];
-        //
-        // let mut i = name_start_i; // bits.
-        //
-        // i += VALUE_STRING_LEN_SIZE;
-        //
-        // if name_len as usize > name.len() {
-        //     return Err(CanError::PayloadData);
-        // }
-        //
-        // for char_i in 0..name_len {
-        //     name[char_i] = bits[i..i + 8].load_le::<u8>();
-        //     i += 8;
-        // }
-        //
-        // Ok(Self {
-        //     value,
-        //     default_value,
-        //     max_value,
-        //     min_value,
-        //     name,
-        //     name_len,
-        // })
+                                 //
+                                 // let val_tag_start_i = 5;
+                                 // let (value, current_i) = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
+                                 //
+                                 //
+                                 // // todo: Max, min and default values
+                                 // let default_value = Value::Empty;
+                                 //
+                                 // let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+                                 //
+                                 // let max_value = NumericValue::Empty;
+                                 // let max_value_size = 0; // todo
+                                 //
+                                 // let min_value = NumericValue::Empty;
+                                 // let min_value_size = 0; // todo
+                                 // // 2 is tag size of numeric value.
+                                 // let min_value_i = max_value_i + 2 + max_value_size + 6;
+                                 //
+                                 // // todo: Update once you include default values.
+                                 // let name_len_i = min_value_i + 2 + min_value_size + 6;
+                                 //
+                                 // // todo: Name section here is DRY with request.
+                                 // let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+                                 //
+                                 // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
+                                 //
+                                 // let mut name = [0; MAX_GET_SET_NAME_LEN];
+                                 //
+                                 // let mut i = name_start_i; // bits.
+                                 //
+                                 // i += VALUE_STRING_LEN_SIZE;
+                                 //
+                                 // if name_len as usize > name.len() {
+                                 //     return Err(CanError::PayloadData);
+                                 // }
+                                 //
+                                 // for char_i in 0..name_len {
+                                 //     name[char_i] = bits[i..i + 8].load_le::<u8>();
+                                 //     i += 8;
+                                 // }
+                                 //
+                                 // Ok(Self {
+                                 //     value,
+                                 //     default_value,
+                                 //     max_value,
+                                 //     min_value,
+                                 //     name,
+                                 //     name_len,
+                                 // })
     }
 }
 
@@ -552,7 +563,10 @@ impl IdAllocationData {
 }
 
 /// Make a GetSet response from common config items. This reduces repetition in node firmware.
-pub fn make_getset_response_common<'a>(config: &ConfigCommon, index: u8) -> Option<GetSetResponse<'a>> {
+pub fn make_getset_response_common<'a>(
+    config: &ConfigCommon,
+    index: u8,
+) -> Option<GetSetResponse<'a>> {
     // We load the default config to determine default values.
     let cfg_default = ConfigCommon::default();
 
