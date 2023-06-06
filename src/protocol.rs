@@ -6,7 +6,10 @@ use core::{
 #[cfg(feature = "hal")]
 use stm32_hal2::rng;
 
-use crate::{broadcast, CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
+use crate::{
+    broadcast::{self, MULTI_FRAME_BUFS_RX_FD, MULTI_FRAME_BUFS_RX_LEGACY},
+    CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL,
+};
 
 /// This includes configuration data that we use on all nodes, and is not part of the official
 /// DroneCAN spec.
@@ -417,8 +420,25 @@ pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> 
     }
 }
 
-pub fn load_multi_frame_rx_frame(rx_buf: &[u8], fd_mode: bool) {
+use defmt::println;
+
+/// Handle a new received frame. This returns true, and fills `payload` with the assembled payload
+/// if this is the last frame in a multi-frame transfer, or if it's a single-frame transfer.
+/// Returns false and doesn't modify the buffer if part of a multi-frame payload, but adjusts
+/// some atomic state variables as-required.
+pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool {
+    // Note: A more flexible API would allow passing in frame bufs instead of pointing
+    // to ours directly. See above commentd-out fn signature.
+    // let frame_bufs = &mut unsafe { broadcast::MULTI_FRAME_BUFS_RX_LEGACY };
     let frame_i = broadcast::RX_FRAME_I.fetch_add(1, Ordering::Relaxed);
+
+    // let single_frame_payload = RX_FRAME_IS_SINGLE.load(Ordering::Acquire);
+
+    let mut single_frame_payload = false;
+    let mut rx_frame_complete = false;
+
+    // Resets the storing index for the next multi-frame payload.
+    // broadcast::RX_FRAME_COMPLETE.store(false, Ordering::Release);
 
     let frame_len = if fd_mode {
         broadcast::DATA_FRAME_MAX_LEN_FD
@@ -426,78 +446,148 @@ pub fn load_multi_frame_rx_frame(rx_buf: &[u8], fd_mode: bool) {
         broadcast::DATA_FRAME_MAX_LEN_LEGACY
     } as usize;
 
-    // Determine if this is the final frame using the tail byte, and mark as complete if so.
-    if rx_buf[frame_len - 1] == 0 {
-        // Potentially last frame; tail byte will be at the last non-zero index.
-        for i2 in 0..frame_len {
-            let i3 = (frame_len - 1) - i2;
-            if rx_buf[i3] != 0 {
-                // let tail_byte = TailByte::from_value(rx_buf[i3 - 1]);
-                // if tail_byte.end_of_transfer {
-                broadcast::RX_FRAME_COMPLETE.store(true, Ordering::Release);
-                // }
+    let mut tail_byte_i = frame_len - 1;
+
+    // If the value at the tail byte index is 0, this is the final frame in the sequence (or a
+    // single-frame payload).
+    if rx_buf[tail_byte_i] == 0 {
+        // The last frame. Locate and parse the tail byte, so we know if this was a single-frame
+        // transfer.
+        for i in 0..frame_len {
+            // Read from the end, towards the front.
+            let i_word = (frame_len - 1) - i;
+            if rx_buf[i_word] != 0 {
+                // We update the tail byte index so we know not to include it in the compiled payload
+                // if this is the last frame.
+                tail_byte_i = i_word;
+                let tail_byte = TailByte::from_value(rx_buf[tail_byte_i]);
+                if tail_byte.end_of_transfer {
+                    rx_frame_complete = true;
+                    if tail_byte.start_of_transfer {
+                        single_frame_payload = true;
+                    }
+                    break;
+                } else {
+                    println!("Unhoh; Tail byte slot is empty, but not teh end of a transfer...");
+                    break;
+                }
             }
         }
     } else {
+        // Check the end of the frame for the tail byte.
+        // todo: DRY with above tail byte check.
         let tail_byte = TailByte::from_value(rx_buf[frame_len - 1]);
         if tail_byte.end_of_transfer {
-            broadcast::RX_FRAME_COMPLETE.store(true, Ordering::Release);
+            rx_frame_complete = true;
+            if tail_byte.start_of_transfer {
+                single_frame_payload = true;
+            }
         }
     }
-    unsafe {
-        broadcast::MULTI_FRAME_BUFS_RX[frame_i][..frame_len].copy_from_slice(&rx_buf[..frame_len]);
+
+    // If we aren't at the end of the frame, load the data into our static buffer, and return false.
+    if !rx_frame_complete {
+        // println!("Part of a multi-frame packet: {:?}", &rx_buf[..frame_len]);
+        unsafe {
+            if fd_mode {
+                MULTI_FRAME_BUFS_RX_FD[frame_i][..frame_len].clone_from_slice(&rx_buf[..frame_len]);
+            } else {
+                MULTI_FRAME_BUFS_RX_LEGACY[frame_i][..frame_len]
+                    .clone_from_slice(&rx_buf[..frame_len]);
+            }
+        }
+        // println!("Loaded: {:?}", &rx_buf[..frame_len]);
+        return false;
     }
-}
 
-/// Create a payload from multiple frame buffers. Resets the frame i.
-/// Do this after the final frame as been received.
-// pub fn payload_from_frames(frame_bufs: &[&[u8]], payload: &mut [u8], fd_mode: bool)  {
-pub fn payload_from_frames(payload: &mut [u8], fd_mode: bool) {
-    // Note: A more flexible API would allow passing in frame bufs instead of pointing
-    // to ours directly. See above commentd-out fn signature.
-    let frame_bufs = &mut unsafe { broadcast::MULTI_FRAME_BUFS_RX };
+    // If it's a single-frame payload, don't bother loading data into the static buffer.
+    if single_frame_payload {
+        payload[..tail_byte_i].clone_from_slice(&rx_buf[..tail_byte_i]);
+        broadcast::RX_FRAME_I.store(0, Ordering::Release);
+        return true;
+    }
 
-    // Resets the storing index for the next multi-frame payload.
-    broadcast::RX_FRAME_I.store(0, Ordering::Release);
-    broadcast::RX_FRAME_COMPLETE.store(false, Ordering::Release);
+    // If we are at the end of a multi-frame payload, compile the frame from parts, and return true.
 
     let mut payload_i = 0;
-
-    let tail_byte_i = if fd_mode {
-        broadcast::DATA_FRAME_MAX_LEN_FD - 1
-    } else {
-        broadcast::DATA_FRAME_MAX_LEN_LEGACY - 1
-    } as usize;
-
     // todo: This currently does not verify CRC.
-    for (frame_i, frame_buf) in frame_bufs.iter().enumerate() {
-        let mut frame_empty = true;
 
-        for (word_i, word) in frame_buf.iter().enumerate() {
-            if payload_i >= payload.len() - 1 {
+    // todo: Nasty DRY here for switching buf; figure it out.
+    if fd_mode {
+        for (frame_i, frame_buf) in unsafe { MULTI_FRAME_BUFS_RX_FD }.iter().enumerate() {
+            let mut frame_empty = true;
+
+            // println!("FRAMEs to compile: {:?}", frame_buf[0..frame_len]);
+
+            // We use a `frame_buf` slice here since for non-FD, we still are usign 64-frame size.
+            for (word_i, word) in frame_buf[0..frame_len].iter().enumerate() {
+                if payload_i >= payload.len() - 1 {
+                    break;
+                }
+
+                if *word != 0 {
+                    frame_empty = false;
+                }
+
+                if (frame_i == 0 && (word_i == 0 || word_i == 1)) || word_i == tail_byte_i {
+                    // the first two bytes are the CRC; not part of the payload.
+                    // The last in each frame (except for the last frame) is the tail byte.
+                    continue;
+                }
+
+                payload[payload_i] = *word;
+                payload_i += 1;
+            }
+
+            if frame_empty {
                 break;
             }
-
-            if *word != 0 {
-                frame_empty = false;
-            }
-
-            // the first two bytes are the CRC; not part of the payload.
-            // The last in each frame (except for the last frame) is the tail byte.
-            if (frame_i == 0 && (word_i == 0 || word_i == 1)) || word_i == tail_byte_i {
-                continue;
-            }
-
-            payload[payload_i] = *word;
-            payload_i += 1;
         }
+    } else {
+        for (frame_i, frame_buf) in unsafe { MULTI_FRAME_BUFS_RX_LEGACY }.iter().enumerate() {
+            let mut frame_empty = true;
+            for (word_i, word) in frame_buf[0..frame_len].iter().enumerate() {
+                if payload_i >= payload.len() - 1 {
+                    break;
+                }
 
-        if frame_empty {
-            // todo: WTH; still getting problems.
-            break;
+                if *word != 0 {
+                    frame_empty = false;
+                }
+
+                if (frame_i == 0 && (word_i == 0 || word_i == 1)) || word_i == tail_byte_i {
+                    continue;
+                }
+
+                payload[payload_i] = *word;
+                payload_i += 1;
+            }
+
+            if frame_empty {
+                break;
+            }
         }
     }
 
+    // println!("First frame buf: {:?}", frame_bufs[0]);
+    // println!("2 frame buf: {:?}", frame_bufs[1]);
+    // println!("3frame buf: {:?}", frame_bufs[2]);
+    // println!("4frame buf: {:?}", frame_bufs[3]);
+
+    // These must match that defined initially.
+    unsafe {
+        if fd_mode {
+            MULTI_FRAME_BUFS_RX_FD = [[0; 64]; 3];
+        } else {
+            MULTI_FRAME_BUFS_RX_LEGACY = [[0; 8]; 20];
+        }
+    }
     // Zero-out for next use.
-    *frame_bufs = [[0; 64]; 20];
+    // *frame_bufs = [[0; 64]; 20];
+    // *frame_bufs = [[0; 8]; 20];
+
+    broadcast::RX_FRAME_I.store(0, Ordering::Release);
+
+    // println!("Completed packet: {:?}", payload[..payload_i]);
+    true
 }

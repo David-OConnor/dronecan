@@ -43,10 +43,10 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 static mut MULTI_FRAME_BUFS_TX: [[u8; 64]; 20] = [[0; 64]; 20];
 
 // This one may be accessed by applications directly.
-pub static mut MULTI_FRAME_BUFS_RX: [[u8; 64]; 20] = [[0; 64]; 20];
+pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; 20] = [[0; 8]; 20];
+pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; 3] = [[0; 64]; 3];
 // Used to identify the next frame to load.
 pub static RX_FRAME_I: AtomicUsize = AtomicUsize::new(0);
-pub static RX_FRAME_COMPLETE: AtomicBool = AtomicBool::new(false);
 
 pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 pub(crate) const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
@@ -185,7 +185,7 @@ fn send_multiple_frames(
     crc.add_payload(payload, payload_len as usize, frame_payload_len);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
-    let bufs = unsafe { &mut MULTI_FRAME_BUFS_RX };
+    let bufs = unsafe { &mut MULTI_FRAME_BUFS_RX_LEGACY };
 
     // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
     // "Multi-frame transfer" re requirements such as CRC and Toggle bit.

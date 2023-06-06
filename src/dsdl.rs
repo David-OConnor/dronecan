@@ -304,8 +304,10 @@ impl<'a> GetSetRequest<'a> {
             v
         } else {
             // todo: Figure it out from message len, or infer from 0s.
-            50 // max name len we use
+            MAX_GET_SET_NAME_LEN // max name len we use
         };
+
+        println!("Name len: {:?}", name_len);
 
         let mut name = [0; MAX_GET_SET_NAME_LEN];
 
