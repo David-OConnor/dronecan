@@ -1,15 +1,20 @@
-use core::{
-    convert::{Infallible, TryInto},
-    sync::atomic::Ordering,
-};
+use core::{convert::TryInto, sync::atomic::AtomicUsize, sync::atomic::Ordering};
 
 #[cfg(feature = "hal")]
 use stm32_hal2::rng;
 
-use crate::{
-    broadcast::{self, MULTI_FRAME_BUFS_RX_FD, MULTI_FRAME_BUFS_RX_LEGACY},
-    CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL,
-};
+use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
+
+// This one may be accessed by applications directly.
+pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; 20] = [[0; 8]; 20];
+pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; 3] = [[0; 64]; 3];
+
+// todo: DRY from braodcast
+pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
+pub(crate) const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
+
+// Used to identify the next frame to load.
+pub static RX_FRAME_I: AtomicUsize = AtomicUsize::new(0);
 
 /// This includes configuration data that we use on all nodes, and is not part of the official
 /// DroneCAN spec.
@@ -420,7 +425,7 @@ pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> 
     }
 }
 
-use defmt::println;
+// use defmt::println;
 
 /// Handle a new received frame. This returns true, and fills `payload` with the assembled payload
 /// if this is the last frame in a multi-frame transfer, or if it's a single-frame transfer.
@@ -430,7 +435,7 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // Note: A more flexible API would allow passing in frame bufs instead of pointing
     // to ours directly. See above commentd-out fn signature.
     // let frame_bufs = &mut unsafe { broadcast::MULTI_FRAME_BUFS_RX_LEGACY };
-    let frame_i = broadcast::RX_FRAME_I.fetch_add(1, Ordering::Relaxed);
+    let frame_i = RX_FRAME_I.fetch_add(1, Ordering::Relaxed);
 
     // let single_frame_payload = RX_FRAME_IS_SINGLE.load(Ordering::Acquire);
 
@@ -441,9 +446,9 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // broadcast::RX_FRAME_COMPLETE.store(false, Ordering::Release);
 
     let frame_len = if fd_mode {
-        broadcast::DATA_FRAME_MAX_LEN_FD
+        DATA_FRAME_MAX_LEN_FD
     } else {
-        broadcast::DATA_FRAME_MAX_LEN_LEGACY
+        DATA_FRAME_MAX_LEN_LEGACY
     } as usize;
 
     let mut tail_byte_i = frame_len - 1;
@@ -468,7 +473,7 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
                     }
                     break;
                 } else {
-                    println!("Unhoh; Tail byte slot is empty, but not teh end of a transfer...");
+                    // println!("Unhoh; Tail byte slot is empty, but not teh end of a transfer...");
                     break;
                 }
             }
@@ -503,7 +508,7 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // If it's a single-frame payload, don't bother loading data into the static buffer.
     if single_frame_payload {
         payload[..tail_byte_i].clone_from_slice(&rx_buf[..tail_byte_i]);
-        broadcast::RX_FRAME_I.store(0, Ordering::Release);
+        RX_FRAME_I.store(0, Ordering::Release);
         return true;
     }
 
@@ -586,7 +591,7 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // *frame_bufs = [[0; 64]; 20];
     // *frame_bufs = [[0; 8]; 20];
 
-    broadcast::RX_FRAME_I.store(0, Ordering::Release);
+    RX_FRAME_I.store(0, Ordering::Release);
 
     // println!("Completed packet: {:?}", payload[..payload_i]);
     true

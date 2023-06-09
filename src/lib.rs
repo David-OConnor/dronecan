@@ -8,7 +8,7 @@
 
 #![no_std]
 
-use core::sync::atomic::{self, AtomicBool, AtomicU16, Ordering};
+use core::sync::atomic::AtomicBool;
 
 use num_enum::TryFromPrimitive;
 
@@ -38,6 +38,17 @@ pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
 
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
+
+/// Calculate the size in bytes needed to store a certain number of bits.
+pub fn bit_size_to_byte_size(len_bits: usize) -> usize {
+    let base_size = len_bits / 8;
+
+    if base_size % 8 > 0 {
+        base_size + 1
+    } else {
+        base_size
+    }
+}
 
 #[derive(Clone, Copy)]
 pub enum CanError {

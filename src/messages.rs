@@ -2,28 +2,7 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
-use core::sync::atomic::{self, AtomicUsize, Ordering};
-
-use packed_struct::PackedStruct;
-
-use num_traits::float::FloatCore; // to round.
-
-use crate::{
-    dsdl::{
-        self, GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
-        NumericValue, SoftwareVersion, Value, PARAM_NAME_NODE_ID,
-    },
-    messages,
-    protocol::RequestResponse,
-    CanError, FrameType, MsgPriority, ServiceData, PAYLOAD_SIZE_CONFIG_COMMON,
-    PAYLOAD_SIZE_NODE_STATUS,
-};
-
-use half::f16;
-
-use bitvec::prelude::*;
-
-use crate::protocol::get_tail_byte;
+use crate::{MsgPriority, PAYLOAD_SIZE_CONFIG_COMMON, PAYLOAD_SIZE_NODE_STATUS};
 
 #[cfg(feature = "hal")]
 use defmt::println;
@@ -84,7 +63,7 @@ impl MsgType {
             Self::GnssAux => 1_061,
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
-            Self::RcInput => 20_400,
+            Self::RcInput => 1_140,
             Self::ChData => 3_103,    // AnyLeaf custom for now
             Self::LinkStats => 3_104, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
@@ -187,7 +166,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
-            Self::RcInput => 69, // todo: Get this from Python once the PR is merged.
+            Self::RcInput => 22_801,
             Self::ChData => 0,
             Self::LinkStats => 0,
             Self::ArdupilotGnssStatus => 47_609,

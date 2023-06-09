@@ -15,8 +15,6 @@ use bitvec::prelude::*;
 
 use defmt::println;
 
-use num_traits::float::FloatCore;
-
 use crate::{
     crc::TransferCrc,
     dsdl::{
@@ -41,12 +39,6 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 // Note: These are only capable of handling one message at a time. This is especially notable
 // for reception.
 static mut MULTI_FRAME_BUFS_TX: [[u8; 64]; 20] = [[0; 64]; 20];
-
-// This one may be accessed by applications directly.
-pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; 20] = [[0; 8]; 20];
-pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; 3] = [[0; 64]; 3];
-// Used to identify the next frame to load.
-pub static RX_FRAME_I: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 pub(crate) const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
@@ -185,7 +177,7 @@ fn send_multiple_frames(
     crc.add_payload(payload, payload_len as usize, frame_payload_len);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
-    let bufs = unsafe { &mut MULTI_FRAME_BUFS_RX_LEGACY };
+    let bufs = unsafe { &mut MULTI_FRAME_BUFS_TX };
 
     // See https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/,
     // "Multi-frame transfer" re requirements such as CRC and Toggle bit.
@@ -891,10 +883,11 @@ pub fn publish_ardupilot_gnss_status(
 /// https://github.com/dronecan/DSDL/blob/master/sensors/rc/20400.RCInput.uavcan
 pub fn publish_rc_input(
     can: &mut Can_,
-    status: u8,
     // 1: valid. 2: failsafe.
-    rssi: u8,
-    rc_in: &[u16], // Each is 12-bits
+    status: u16,
+    // `quality` is scaled between 0 (no signal) and 255 (full signal)
+    quality: u8,
+    rc_in: &[u16], // Includes control and aux channels. Each is 12-bits
     num_channels: u8,
     fd_mode: bool,
     node_id: u8,
@@ -903,18 +896,29 @@ pub fn publish_rc_input(
 
     let m_type = MsgType::RcInput;
 
-    let payload_len =
-        ((m_type.payload_size() as f32 + 12. * num_channels as f32) / 8.).ceil() as usize;
+    buf[0..2].copy_from_slice(&status.to_le_bytes());
+    buf[2] = quality;
 
     let bits = buf.view_bits_mut::<Msb0>();
 
-    let mut i_bits = 24; // (u16 + u8 admin data)
+    let mut i_bits = 24; // (u16 + u8 status and quality)
+
+    let rcin_len = crate::bit_size_to_byte_size(num_channels as usize);
+
+    // For FD, add the length field of 6 bits.
+    if fd_mode {
+        bits[i_bits..6].store_le(rcin_len as u8);
+        i_bits += 6;
+    }
+
     for ch in rc_in {
         bits[i_bits..i_bits + 12].store_le(*ch);
         i_bits += 12;
     }
 
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
+
+    let payload_len = m_type.payload_size() as usize + rcin_len;
 
     broadcast(
         can,

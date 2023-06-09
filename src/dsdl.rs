@@ -8,11 +8,15 @@ use defmt::println;
 use crate::{protocol::ConfigCommon, CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS};
 
 // pub const PARAM_NAME_NODE_ID: [u8; 14] = *b"uavcan.node_id";
-pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
-pub const PARAM_NAME_BIT_RATE: &'static [u8] = "uavcan.bit_rate".as_bytes();
+// pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
+// pub const PARAM_NAME_BIT_RATE: &'static [u8] = "uavcan.bit_rate".as_bytes();
 
-// Must be postfixed with full data type name, eg `uavcan.pubp-uavcan.protocol.NodeStatus`
-pub const PARAM_NAME_PUBLICATION_PERIOD: &'static str = "uavcan.pubp-";
+// todo: QC if you need all lower case.
+pub const PARAM_NAME_NODE_ID: &'static [u8] =
+    "Node ID (desired if dynamic allocation is set)".as_bytes();
+pub const PARAM_NAME_DYNAMIC_ID: &'static [u8] = "Dynamic ID allocation".as_bytes();
+pub const PARAM_NAME_FD_MODE: &'static [u8] = "CAN FD enabled".as_bytes();
+pub const PARAM_NAME_BITRATE: &'static [u8] = "CAN bitrate (see datasheet)".as_bytes();
 
 // Used to determine which enum (union) variant is used.
 // "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"
@@ -307,7 +311,7 @@ impl<'a> GetSetRequest<'a> {
             MAX_GET_SET_NAME_LEN // max name len we use
         };
 
-        println!("Name len: {:?}", name_len);
+        // println!("Name len: {:?}", name_len);
 
         let mut name = [0; MAX_GET_SET_NAME_LEN];
 
@@ -339,6 +343,7 @@ pub struct GetSetResponse<'a> {
     pub max_value: NumericValue,
     pub min_value: NumericValue,
     /// Empty name (and/or empty value) in response indicates that there is no such parameter.
+    // pub name: [u8; MAX_GET_SET_NAME_LEN], // large enough for many uses
     pub name: [u8; MAX_GET_SET_NAME_LEN], // large enough for many uses
     pub name_len: usize,
     // pub name: &'a [u8], // up to 92 bytes.
@@ -381,8 +386,7 @@ impl<'a> GetSetResponse<'a> {
             i_bit += 8;
         }
 
-        // Todo: If this is exactly divisible by 8, this returns a len 1 too long.
-        (i_bit / 8) + 1
+        crate::bit_size_to_byte_size(i_bit)
     }
 
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
@@ -576,8 +580,8 @@ pub fn make_getset_response_common<'a>(
 
     match index {
         0 => {
-            let text = "Node ID (desired if dynamic allocation is set)";
-            name[0..text.len()].copy_from_slice(text.as_bytes());
+            let text = PARAM_NAME_NODE_ID;
+            name[0..text.len()].copy_from_slice(text);
 
             Some(GetSetResponse {
                 value: Value::Integer(config.node_id as i64),
@@ -589,8 +593,8 @@ pub fn make_getset_response_common<'a>(
             })
         }
         1 => {
-            let text = "Dynamic ID allocation";
-            name[0..text.len()].copy_from_slice(text.as_bytes());
+            let text = PARAM_NAME_DYNAMIC_ID;
+            name[0..text.len()].copy_from_slice(text);
 
             Some(GetSetResponse {
                 value: Value::Boolean(config.dynamic_id_allocation),
@@ -602,8 +606,8 @@ pub fn make_getset_response_common<'a>(
             })
         }
         2 => {
-            let text = "FD enabled";
-            name[0..text.len()].copy_from_slice(text.as_bytes());
+            let text = PARAM_NAME_FD_MODE;
+            name[0..text.len()].copy_from_slice(text);
 
             Some(GetSetResponse {
                 value: Value::Boolean(config.fd_mode),
@@ -615,8 +619,8 @@ pub fn make_getset_response_common<'a>(
             })
         }
         3 => {
-            let text = "Bitrate (see datasheet)";
-            name[0..text.len()].copy_from_slice(text.as_bytes());
+            let text = PARAM_NAME_BITRATE;
+            name[0..text.len()].copy_from_slice(text);
 
             Some(GetSetResponse {
                 value: Value::Integer(config.can_bitrate as i64),
