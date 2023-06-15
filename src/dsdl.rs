@@ -634,3 +634,54 @@ pub fn make_getset_response_common<'a>(
         _ => None,
     }
 }
+
+#[derive(Default)]
+/// https://www.expresslrs.org/3.0/info/signal-health/
+/// Currently AnyLeaf only.
+pub struct LinkStats {
+    // /// Timestamp these stats were recorded. (TBD format; processed locally; not part of packet from tx).
+    // pub timestamp: u32,
+    /// Uplink - received signal strength antenna 1 (RSSI). RSSI dBm as reported by the RX. Values
+    /// vary depending on mode, antenna quality, output power and distance. Ranges from -128 to 0.
+    pub uplink_rssi_1: u8,
+    /// Uplink - received signal strength antenna 2 (RSSI). Second antenna RSSI, used in diversity mode
+    /// (Same range as rssi_1)
+    pub uplink_rssi_2: u8,
+    /// Uplink - link quality (valid packets). The number of successful packets out of the last
+    /// 100 from TX → RX
+    pub uplink_link_quality: u8,
+    /// Uplink - signal-to-noise ratio. SNR reported by the RX. Value varies mostly by radio chip
+    /// and gets lower with distance (once the agc hits its limit)
+    pub uplink_snr: i8,
+    /// Active antenna for diversity RX (0 - 1)
+    pub active_antenna: u8,
+    pub rf_mode: u8,
+    /// Uplink - transmitting power. See the `ElrsTxPower` enum and its docs for details.
+    pub uplink_tx_power: u8,
+    /// Downlink - received signal strength (RSSI). RSSI dBm of telemetry packets received by TX.
+    pub downlink_rssi: u8,
+    /// Downlink - link quality (valid packets). An LQ indicator of telemetry packets received RX → TX
+    /// (0 - 100)
+    pub downlink_link_quality: u8,
+    /// Downlink - signal-to-noise ratio. SNR reported by the TX for telemetry packets
+    pub downlink_snr: i8,
+}
+
+impl LinkStats {
+    pub fn to_bytes(&self) -> [u8; MsgType::LinkStats.payload_size() as usize] {
+        let mut result = [0; MsgType::LinkStats.payload_size() as usize];
+
+        result[0] = self.uplink_rssi_1;
+        result[1] = self.uplink_rssi_2;
+        result[2] = self.uplink_link_quality;
+        result[3] = self.uplink_snr as u8;
+        result[4] = self.active_antenna;
+        result[5] = self.rf_mode;
+        result[6] = self.uplink_tx_power;
+        result[7] = self.downlink_rssi;
+        result[8] = self.downlink_link_quality;
+        result[9] = self.downlink_snr as u8;
+
+        result
+    }
+}

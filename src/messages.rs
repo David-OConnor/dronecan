@@ -29,7 +29,7 @@ pub enum MsgType {
     Fix2,
     GlobalNavigationSolution,
     RcInput,   // WIP
-    ChData,    // AnyLeaf custom for now
+    // ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
     ArdupilotGnssStatus,
     SetConfig, // Anyleaf custom for now.
@@ -64,8 +64,8 @@ impl MsgType {
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
             Self::RcInput => 1_140,
-            Self::ChData => 3_103,    // AnyLeaf custom for now
-            Self::LinkStats => 3_104, // AnyLeaf custom for now.
+            // Self::ChData => 3_103,    // AnyLeaf custom for now
+            Self::LinkStats => 1_141, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
             Self::SetConfig => 3_105, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
@@ -82,7 +82,7 @@ impl MsgType {
         match self {
             Self::RawImu => MsgPriority::Immediate,
             Self::AhrsSolution => MsgPriority::Immediate,
-            Self::ChData => MsgPriority::Immediate,
+            Self::RcInput => MsgPriority::Immediate,
             Self::RawAirData => MsgPriority::Fast,
             Self::MagneticFieldStrength2 => MsgPriority::Fast,
             Self::GlobalNavigationSolution => MsgPriority::High,
@@ -124,12 +124,12 @@ impl MsgType {
             Self::GlobalNavigationSolution => 88,
             // This is the rssi and status items; add 12 bits for every channel
             Self::RcInput => 3,
-            Self::ChData => 38,             // todo
-            Self::LinkStats => 38,          // todo
+            // Self::ChData => 38,
+            Self::LinkStats => 10,
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8,
+            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 12,
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 2,
             Self::PositFusedAnyleaf => 36,
@@ -167,7 +167,7 @@ impl MsgType {
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
             Self::RcInput => 22_801,
-            Self::ChData => 0,
+            // Self::ChData => 0,
             Self::LinkStats => 0,
             Self::ArdupilotGnssStatus => 47_609,
             Self::SetConfig => 0,

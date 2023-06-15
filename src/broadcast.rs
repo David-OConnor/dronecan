@@ -19,7 +19,7 @@ use crate::{
     crc::TransferCrc,
     dsdl::{
         GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
-        SoftwareVersion,
+        SoftwareVersion, LinkStats,
     },
     find_tail_byte_index,
     gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
@@ -101,6 +101,7 @@ static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 
 // This buffer accomodates up to 16 12-bit channels. (195 bits)
 static mut BUF_RC_INPUT: [u8; 200] = [0; 200];
+static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
@@ -919,6 +920,34 @@ pub fn publish_rc_input(
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
 
     let payload_len = m_type.payload_size() as usize + rcin_len;
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        Some(payload_len),
+    )
+}
+
+pub fn publish_link_stats(
+    can: &mut Can_,
+    data: &LinkStats,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_LINK_STATS};
+
+    let m_type = MsgType::LinkStats;
+
+    buf.copy_from_slice(&data.to_bytes());
+
+    let transfer_id = TRANSFER_ID_LINK_STATS.fetch_add(1, Ordering::Relaxed);
+
+    let payload_len = m_type.payload_size() as usize;
 
     broadcast(
         can,
