@@ -18,10 +18,10 @@ use defmt::println;
 use crate::{
     crc::TransferCrc,
     dsdl::{
-        GetSetResponse, HardwareVersion, IdAllocationData, NodeHealth, NodeMode, NodeStatus,
-        SoftwareVersion, LinkStats,
+        GetSetResponse, HardwareVersion, IdAllocationData, LinkStats, NodeHealth, NodeMode,
+        NodeStatus, SoftwareVersion,
     },
-    find_tail_byte_index,
+    f16, find_tail_byte_index,
     gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
     make_tail_byte,
     messages::MsgType,
@@ -32,7 +32,6 @@ use crate::{
 use packed_struct::PackedStruct;
 
 use core::convert::Infallible;
-use half::f16;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -939,7 +938,7 @@ pub fn publish_link_stats(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-    let buf = unsafe { &mut BUF_LINK_STATS};
+    let buf = unsafe { &mut BUF_LINK_STATS };
 
     let m_type = MsgType::LinkStats;
 
@@ -1112,7 +1111,7 @@ pub fn handle_restart_request(
         None,
     )?;
 
-    let cp = unsafe { cortex_m::Peripherals::steal() };
+    // let cp = unsafe { cortex_m::Peripherals::steal() };
     // todo: Not working.
     // cp.SCB.sys_reset();
 

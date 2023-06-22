@@ -28,7 +28,7 @@ pub enum MsgType {
     GnssAux,
     Fix2,
     GlobalNavigationSolution,
-    RcInput,   // WIP
+    RcInput, // WIP
     // ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
     ArdupilotGnssStatus,
@@ -129,7 +129,7 @@ impl MsgType {
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 12,
+            Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 2,
             Self::PositFusedAnyleaf => 36,

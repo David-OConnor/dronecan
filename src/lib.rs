@@ -106,3 +106,36 @@ impl CanBitrate {
         }
     }
 }
+
+/// 16-bit floating point
+/// Alternative to `half` lib, without bringing in a dep
+///
+#[allow(non_camel_case_types)]
+pub struct f16 {
+    bits: u16,
+}
+
+impl f16 {
+    pub fn from_f32(val: f32) -> Self {
+        //https://stackoverflow.com/questions/1659440/32-bit-to-16-bit-floating-point-conversion
+
+        let b = val as u32 + 0x0000_1000; // round-to-nearest-even: add last bit after truncated mantissa
+        let e = (b & 0x7F80_0000) >> 23; // exponent
+        let m = b & 0x007F_FFFF; // mantissa; in line below: 0x007FF000 = 0x00800000-0x00001000 = decimal indicator flag - initial rounding
+        Self {
+            bits: ((b & 0x8000_0000) >> 16
+                | ((e > 112) as u32) * ((((e - 112) << 10) & 0x7C00) | m >> 13)
+                | (((e < 113) as u32) & ((e > 101) as u32))
+                    * ((((0x007FF000 + m) >> (125 - e)) + 1) >> 1)
+                | ((e > 143) as u32) * 0x7FFF) as u16,
+        } // sign : normalized : denormalized : saturate
+    }
+
+    pub fn to_le_bytes(&self) -> [u8; 2] {
+        self.bits.to_le_bytes()
+    }
+
+    pub fn to_be_bytes(&self) -> [u8; 2] {
+        self.bits.to_be_bytes()
+    }
+}
