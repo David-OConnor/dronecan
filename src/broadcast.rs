@@ -887,6 +887,7 @@ pub fn publish_rc_input(
     status: u16,
     // `quality` is scaled between 0 (no signal) and 255 (full signal)
     quality: u8,
+    id: u8, // u4
     rc_in: &[u16], // Includes control and aux channels. Each is 12-bits
     num_channels: u8,
     fd_mode: bool,
@@ -898,10 +899,11 @@ pub fn publish_rc_input(
 
     buf[0..2].copy_from_slice(&status.to_le_bytes());
     buf[2] = quality;
+    buf[3] = id & 0b1111;
 
     let bits = buf.view_bits_mut::<Msb0>();
 
-    let mut i_bits = 24; // (u16 + u8 status and quality)
+    let mut i_bits = 28; // (u16 + u8 + u4 status, quality, id)
 
     let rcin_len = crate::bit_size_to_byte_size(num_channels as usize);
 

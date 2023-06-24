@@ -122,8 +122,8 @@ impl MsgType {
             Self::Fix2 => 62, // 50 without covariance, plus 12 with.
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88,
-            // This is the rssi and status items; add 12 bits for every channel
-            Self::RcInput => 3,
+            // This is the rssi, status, and id items; add 12 bits for every channel
+            Self::RcInput => 4,
             // Self::ChData => 38,
             Self::LinkStats => 10,
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
@@ -166,7 +166,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
-            Self::RcInput => 22_801,
+            Self::RcInput => 22_801, // todo: Update this once ID field PR is merged
             // Self::ChData => 0,
             Self::LinkStats => 0,
             Self::ArdupilotGnssStatus => 47_609,

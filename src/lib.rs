@@ -190,6 +190,14 @@ impl f16 {
 
         Self { bits }
     }
+    //
+    // pub fn to_f32(self) -> f32 {
+    //     // todo
+    // }
+    //
+    // pub fn from_le_bytes(bytes: [u8; 2]) -> Self {
+    //     // todo
+    // }
 
     pub fn to_le_bytes(&self) -> [u8; 2] {
         self.bits.to_le_bytes()
