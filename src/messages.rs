@@ -111,8 +111,9 @@ impl MsgType {
             Self::GetSet => 0,
             Self::NodeStatus => PAYLOAD_SIZE_NODE_STATUS as u8,
             // AHRS solution: Assumes no covariance values. The first 2 cov fields have a 4-bit
-            // lenght; the last doesn't use one. Includes the void fields.
-            Self::AhrsSolution => 23,
+            // length; the last doesn't use one for non-FD mode. So, for FD mode, you may need a custom len.
+            // Includes the void fields.
+            Self::AhrsSolution => 29,
             Self::MagneticFieldStrength2 => 7,
             Self::RawImu => 47,
             Self::RawAirData => 0,

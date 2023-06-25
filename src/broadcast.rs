@@ -87,7 +87,7 @@ static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 // Includes extra room too.
 static mut BUF_GET_SET: [u8; 110] = [0; 110];
 
-static mut BUF_AHRS_SOLUTION: [u8; 24] = [0; 24]; // Note: No covariance.
+static mut BUF_AHRS_SOLUTION: [u8; 31] = [0; 31]; // Note: No covariance.
                                                   // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
                                                   // Potentially need size 12 for mag strength in FD mode, even with no cov.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 12] = [0; 12]; // Note: No covariance.
@@ -506,7 +506,7 @@ pub fn publish_time_sync(
     let buf = unsafe { &mut BUF_TIME_SYNC };
 
     buf[..7].clone_from_slice(
-        &(previous_transmission_timestamp_usec & 0xff_ffff_ffff_ffff).to_le_bytes(),
+        &previous_transmission_timestamp_usec.to_le_bytes(),
     );
 
     let transfer_id = TRANSFER_ID_GLOBAL_TIME_SYNC.fetch_add(1, Ordering::Relaxed);
@@ -618,12 +618,11 @@ pub fn publish_ahrs_solution(
     let lin_acc_y = f16::from_f32(linear_accel[1]);
     let lin_acc_z = f16::from_f32(linear_accel[2]);
 
+    buf[..7].clone_from_slice(&timestamp.to_le_bytes()[0..7]);
+
     let bits = buf.view_bits_mut::<Msb0>();
 
-    let mut i = 0;
-
-    bits[0..i + 7].store_le(timestamp);
-    i += 7;
+    let mut i = 56; // bits
 
     for v in &[or_x, or_y, or_z, or_w] {
         let v = u16::from_le_bytes(v.to_le_bytes());
@@ -631,8 +630,8 @@ pub fn publish_ahrs_solution(
         i += 16;
     }
 
-    // pad and 0-len covar
-    bits[i..i + 8].store_le(0_u8);
+    // 4-bit pad and 0-len covar
+    bits[i..i + 8].store_le(0);
     i += 8;
 
     for v in &[ang_v_x, ang_v_y, ang_v_z] {
@@ -641,7 +640,8 @@ pub fn publish_ahrs_solution(
         i += 16;
     }
 
-    bits[i..i + 8].store_le(0_u8);
+    // 4-bit pad and 0-len covar
+    bits[i..i + 8].store_le(0);
     i += 8;
 
     for v in &[lin_acc_x, lin_acc_y, lin_acc_z] {
@@ -650,9 +650,18 @@ pub fn publish_ahrs_solution(
         i += 16;
     }
 
+    // For FD mode, ensure final len field for lin acc cov is 0.
+    bits[i..i + 4].store_le(0);
+
     // todo: Covariance as-required.
 
     let transfer_id = TRANSFER_ID_AHRS_SOLUTION.fetch_add(1, Ordering::Relaxed);
+
+    let payload_size = if fd_mode {
+        m_type.payload_size() + 1 // Due to no TCO on final cov array.
+    } else {
+        m_type.payload_size()
+    };
 
     broadcast(
         can,
@@ -662,7 +671,7 @@ pub fn publish_ahrs_solution(
         transfer_id as u8,
         buf,
         fd_mode,
-        None,
+        Some(payload_size as usize),
     )
 }
 
@@ -727,7 +736,7 @@ pub fn publish_raw_imu(
 
     let buf = unsafe { &mut BUF_RAW_IMU };
 
-    buf[..7].clone_from_slice(&(timestamp & 0b111_1111).to_le_bytes()[0..7]);
+    buf[..7].clone_from_slice(&timestamp.to_le_bytes()[0..7]);
     // integration interval: 0 here.
 
     buf[11..13].clone_from_slice(&f16::from_f32(gyro[0]).to_le_bytes());
@@ -948,8 +957,6 @@ pub fn publish_link_stats(
 
     let transfer_id = TRANSFER_ID_LINK_STATS.fetch_add(1, Ordering::Relaxed);
 
-    let payload_len = m_type.payload_size() as usize;
-
     broadcast(
         can,
         FrameType::Message,
@@ -958,7 +965,7 @@ pub fn publish_link_stats(
         transfer_id as u8,
         buf,
         fd_mode,
-        Some(payload_len),
+        None,
     )
 }
 
@@ -976,11 +983,8 @@ pub fn request_id_allocation_req(
 
     buf[0..m_type.payload_size() as usize].clone_from_slice(&data.to_bytes(fd_mode));
 
-    // todo: Does id allocation process always need to be 8-byte frames? Experiment
-
     let transfer_id = TRANSFER_ID_ID_ALLOCATION.fetch_add(1, Ordering::Relaxed);
 
-    // todo: Make this work with FD frames.
     // 6 bytes of unique_id unless in the final stage; then 4.
     let len = if fd_mode {
         m_type.payload_size() as usize
