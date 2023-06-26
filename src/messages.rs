@@ -64,7 +64,6 @@ impl MsgType {
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
             Self::RcInput => 1_140,
-            // Self::ChData => 3_103,    // AnyLeaf custom for now
             Self::LinkStats => 1_141, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
             Self::SetConfig => 3_105, // Anyleaf custom for now.
@@ -143,10 +142,10 @@ impl MsgType {
     }
 
     /// .base_crc in Pydronecan
-    /// def get_info(a, b):
-    ///     val = dronecan.DATATYPES[(a, b)]
-    ///     print(val)
-    ///     print(val.base_crc)
+    // def get_info(a, b):
+    //     val = dronecan.DATATYPES[(a, b)]
+    //     print(val)
+    //     print(val.base_crc)
     pub fn base_crc(&self) -> u16 {
         match self {
             Self::IdAllocation => 62_040,
@@ -167,7 +166,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
-            Self::RcInput => 22_801, // todo: Update this once ID field PR is merged
+            Self::RcInput => 42_648,
             // Self::ChData => 0,
             Self::LinkStats => 0,
             Self::ArdupilotGnssStatus => 47_609,

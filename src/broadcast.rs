@@ -144,8 +144,11 @@ fn can_send(
         marker: None,
     };
 
+    println!("a");
     // This wait appears to be required, pending handling using a queue in the callback.
-    while !can.is_transmitter_idle() {}
+    while !can.is_transmitter_idle() {} // todo: Put back once you figure it out!!
+
+    println!("b");
 
     // Not sure if this helps or is required etc.
     // atomic::compiler_fence(Ordering::SeqCst);
@@ -261,7 +264,6 @@ pub fn broadcast(
     payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
     // This saves some if logic in node firmware re decision to broadcast.
-
     if source_node_id == 0 && frame_type != FrameType::MessageAnon {
         return Err(CanError::PayloadData);
     }
@@ -505,9 +507,7 @@ pub fn publish_time_sync(
 
     let buf = unsafe { &mut BUF_TIME_SYNC };
 
-    buf[..7].clone_from_slice(
-        &previous_transmission_timestamp_usec.to_le_bytes(),
-    );
+    buf[..7].clone_from_slice(&previous_transmission_timestamp_usec.to_le_bytes());
 
     let transfer_id = TRANSFER_ID_GLOBAL_TIME_SYNC.fetch_add(1, Ordering::Relaxed);
 
@@ -896,7 +896,7 @@ pub fn publish_rc_input(
     status: u16,
     // `quality` is scaled between 0 (no signal) and 255 (full signal)
     quality: u8,
-    id: u8, // u4
+    id: u8,        // u4
     rc_in: &[u16], // Includes control and aux channels. Each is 12-bits
     num_channels: u8,
     fd_mode: bool,
@@ -953,7 +953,7 @@ pub fn publish_link_stats(
 
     let m_type = MsgType::LinkStats;
 
-    buf.copy_from_slice(&data.to_bytes());
+    buf[0..m_type.payload_size() as usize].copy_from_slice(&data.to_bytes());
 
     let transfer_id = TRANSFER_ID_LINK_STATS.fetch_add(1, Ordering::Relaxed);
 
