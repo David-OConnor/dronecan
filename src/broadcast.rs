@@ -98,8 +98,8 @@ static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte,
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
 
-// This buffer accomodates up to 16 12-bit channels. (195 bits)
-static mut BUF_RC_INPUT: [u8; 200] = [0; 200];
+// This buffer accomodates up to 16 12-bit channels. (224 bits or 28 bytes)
+static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
 static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
@@ -107,6 +107,7 @@ static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
+use stm32_hal2::pac; // todo t
 /// Write out packet to the CAN peripheral.
 fn can_send(
     can: &mut Can_,
@@ -144,11 +145,43 @@ fn can_send(
         marker: None,
     };
 
-    println!("a");
-    // This wait appears to be required, pending handling using a queue in the callback.
-    while !can.is_transmitter_idle() {} // todo: Put back once you figure it out!!
+    unsafe {
+        let regs = &(*pac::FDCAN1::ptr());
+        // println!("SR: {}", regs.psr.read().bits());
+    }
+    // Some example codes:
+    // 1800: Good code, where no ESP is in place. Constant.
 
-    println!("b");
+    // No LEC.Idle. Last of 111 (no change). Thi is means all is well.
+
+    // 1896: Error + warning. No LEC. Doesn't hang.
+    // 1864: Warning only. No LEC. Doesn't hang.
+
+    // These cause a hang, and both have LEC: Bit0Error.
+    // "Bit0Error: During the transmission of a message (or acknowledge bit, or active error
+    // flag, or overload flag), the device wanted to send a dominant level (data or identifier bit logical
+    // value 0), but the monitored bus value was recessive."
+    // 2021 means idle. 1901 means synchronizing.
+    // Both have Error passive and Error warning status.
+    // 2021 means Bus off (!)
+    // Both have Data Last Error code of 111. (no change)
+
+    // 1901: // bad code, prior to hanging.
+    // 2021: // bad code, at hanging.
+
+    // These eventually hang.
+    // 616 has no Last Error code. 617 has Stuff Error. 618 has Form Error
+    // Rest same. Idle, EW + EP, DLEC = 001.
+
+    // 616:
+    // 617:
+    // 618:
+
+    // println!("a");
+    // This wait appears to be required, pending handling using a queue in the callback.
+    while !can.is_transmitter_idle() {}
+
+    // println!("b");
 
     // Not sure if this helps or is required etc.
     // atomic::compiler_fence(Ordering::SeqCst);
@@ -264,6 +297,7 @@ pub fn broadcast(
     payload_size: Option<usize>, // Overrides that of message_type if present.
 ) -> Result<(), CanError> {
     // This saves some if logic in node firmware re decision to broadcast.
+
     if source_node_id == 0 && frame_type != FrameType::MessageAnon {
         return Err(CanError::PayloadData);
     }
@@ -904,6 +938,8 @@ pub fn publish_rc_input(
 ) -> Result<(), CanError> {
     let buf = unsafe { &mut BUF_RC_INPUT };
 
+    const CHAN_SIZE_BITS: usize = 12;
+
     let m_type = MsgType::RcInput;
 
     buf[0..2].copy_from_slice(&status.to_le_bytes());
@@ -914,7 +950,9 @@ pub fn publish_rc_input(
 
     let mut i_bits = 28; // (u16 + u8 + u4 status, quality, id)
 
-    let rcin_len = crate::bit_size_to_byte_size(num_channels as usize);
+    // 12 bits per channel.
+    let rcin_len = crate::bit_size_to_byte_size(num_channels as usize * CHAN_SIZE_BITS);
+    // println!("RCIN len: {:?}", rcin_len);
 
     // For FD, add the length field of 6 bits.
     if fd_mode {
@@ -923,13 +961,16 @@ pub fn publish_rc_input(
     }
 
     for ch in rc_in {
-        bits[i_bits..i_bits + 12].store_le(*ch);
-        i_bits += 12;
+        bits[i_bits..i_bits + CHAN_SIZE_BITS].store_le(*ch);
+        i_bits += CHAN_SIZE_BITS;
     }
 
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
 
     let payload_len = m_type.payload_size() as usize + rcin_len;
+
+    // println!("Payload len: {}", payload_len);
+    // println!("Buf: {:?}", buf);
 
     broadcast(
         can,

@@ -19,6 +19,8 @@ mod crc;
 pub mod dsdl;
 #[cfg(feature = "hal")]
 pub mod gnss;
+#[cfg(feature = "hal")]
+pub mod hardware;
 pub mod messages;
 pub mod protocol;
 
@@ -43,7 +45,7 @@ static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 pub fn bit_size_to_byte_size(len_bits: usize) -> usize {
     let base_size = len_bits / 8;
 
-    if base_size % 8 > 0 {
+    if len_bits % 8 > 0 {
         base_size + 1
     } else {
         base_size
@@ -103,6 +105,19 @@ impl CanBitrate {
             Self::B4m => unimplemented!(),
             Self::B5m => (2, 14, 2),
             Self::B8m => unimplemented!(),
+        }
+    }
+
+    // todo: QC these for 2M+!
+    pub fn timings_120_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (30, 13, 2),
+            Self::B500k => (15, 13, 2),
+            Self::B1m => (8, 12, 2),
+            Self::B2m => (4, 12, 2),
+            Self::B4m => (2, 12, 2),
+            Self::B5m => unimplemented!(),
+            Self::B8m => (1, 12, 2),
         }
     }
 }
@@ -210,105 +225,4 @@ impl f16 {
     pub fn as_u16(&self) -> u16 {
         self.bits
     }
-}
-
-#[cfg(feature = "hal")]
-use stm32_hal2::{can::Can, pac::FDCAN1};
-
-#[cfg(feature = "hal")]
-use fdcan::{
-    config as can_config,
-    filter::{Action, ExtendedFilter, ExtendedFilterSlot, FilterType},
-    interrupt::{Interrupt, InterruptLine},
-    FdCan, NormalOperationMode,
-};
-
-#[cfg(feature = "hal")]
-pub type Can_ = FdCan<Can, NormalOperationMode>;
-
-#[cfg(feature = "hal")]
-use core::num::{NonZeroU16, NonZeroU8};
-
-#[cfg(feature = "hal")]
-pub fn setup_can(can_pac: FDCAN1, bitrate: CanBitrate) -> Can_ {
-    let mut can = FdCan::new(Can::new(can_pac)).into_config_mode();
-    // Nominal (arbitration) bit rate is almost 1Mhz or less, for compatibility
-    // with non-FD devices on the bus.
-
-    // todo: Hard-coded for 160, for now at least.
-    let (prescaler_nom, seg1_nom, seg2_nom) = match bitrate {
-        CanBitrate::B250k => CanBitrate::B250k.timings_160_mhz(),
-        CanBitrate::B500k => CanBitrate::B500k.timings_160_mhz(),
-        _ => CanBitrate::B1m.timings_160_mhz(),
-    };
-
-    let (prescaler_data, seg1_data, seg2_data) = bitrate.timings_160_mhz();
-
-    let nominal_bit_timing = can_config::NominalBitTiming {
-        prescaler: NonZeroU16::new(prescaler_nom).unwrap(),
-        seg1: NonZeroU8::new(seg1_nom).unwrap(),
-        seg2: NonZeroU8::new(seg2_nom).unwrap(),
-        sync_jump_width: NonZeroU8::new(1).unwrap(),
-    };
-
-    let data_bit_timing = can_config::DataBitTiming {
-        prescaler: NonZeroU8::new(prescaler_data as u8).unwrap(),
-        seg1: NonZeroU8::new(seg1_data).unwrap(),
-        seg2: NonZeroU8::new(seg2_data).unwrap(),
-        sync_jump_width: NonZeroU8::new(1).unwrap(),
-        transceiver_delay_compensation: true,
-    };
-
-    can.set_protocol_exception_handling(false); // todo?
-    can.set_nominal_bit_timing(nominal_bit_timing);
-    can.set_data_bit_timing(data_bit_timing);
-
-    // Accept message type ids 1 - 10
-    let filter_dronecan_standard = ExtendedFilter {
-        filter: FilterType::BitMask {
-            // todo: Do we need to shift this?
-            // filter: 0b1111 << 8,  // Message type ids 1-16.
-            filter: 0b1111, // Message type ids 1-16.
-            // "A 0 bit at the filter mask masks out the corresponding bit position of the configured ID filter,
-            // e.g. the value of the received Message ID at that bit position is not relevant for acceptance
-            // filtering. Only those bits of the received Message ID where the corresponding mask bits are
-            // one are relevant for acceptance filtering.
-            // In case all mask bits are one, a match occurs only when the received Message ID and the
-            // Message ID filter are identical. If all mask bits are 0, all Message IDs match."
-            // So, we filter the message ID field only.
-            mask: (0xffff << 8),
-        },
-        action: Action::StoreInFifo0,
-    };
-
-    // Accept message type ids 3_110 and 3_111.
-    let _filter_custom = ExtendedFilter {
-        filter: FilterType::BitMask {
-            filter: 0x0,
-            mask: (0xffff << 8),
-        },
-        action: Action::StoreInFifo0,
-    };
-
-    // can.set_extended_filter(
-    //     ExtendedFilterSlot::_0,
-    //     ExtendedFilter::accept_all_into_fifo0(),
-    // );
-
-    can.set_extended_filter(ExtendedFilterSlot::_0, filter_dronecan_standard);
-
-    // todo: Figure out how it works.
-    // can.set_extended_filter(
-    //     ExtendedFilterSlot::_1,
-    //     filter_custom,
-    // );
-
-    can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
-
-    can.enable_interrupt(Interrupt::RxFifo0NewMsg);
-
-    // This appears to be backwards in the hardware; Need line 1 on G4 for FIFO 0.
-    can.enable_interrupt_line(InterruptLine::_1, true);
-
-    can.into_normal()
 }
