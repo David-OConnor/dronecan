@@ -11,12 +11,27 @@ use crate::{protocol::ConfigCommon, CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS}
 // pub const PARAM_NAME_NODE_ID: &'static [u8] = "uavcan.node_id".as_bytes();
 // pub const PARAM_NAME_BIT_RATE: &'static [u8] = "uavcan.bit_rate".as_bytes();
 
+// To simplify some logic re trailing values, we only match the first few characters of the param name.
+pub const NAME_CUTOFF: usize = 6;
+
 // todo: QC if you need all lower case.
 pub const PARAM_NAME_NODE_ID: &'static [u8] =
     "Node ID (desired if dynamic allocation is set)".as_bytes();
 pub const PARAM_NAME_DYNAMIC_ID: &'static [u8] = "Dynamic ID allocation".as_bytes();
 pub const PARAM_NAME_FD_MODE: &'static [u8] = "CAN FD enabled".as_bytes();
 pub const PARAM_NAME_BITRATE: &'static [u8] = "CAN bitrate (see datasheet)".as_bytes();
+
+// Workaround due to being unable to slice in match statement.
+// todo: ...hack since below isn't working.
+pub const PARAM_NAME_NODE_ID_CUTOFF: &'static [u8] = "Node I".as_bytes();
+pub const PARAM_NAME_DYNAMIC_ID_CUTOFF: &'static [u8] = "Dynami".as_bytes();
+pub const PARAM_NAME_FD_MODE_CUTOFF: &'static [u8] = "CAN FD".as_bytes();
+pub const PARAM_NAME_BITRATE_CUTOFF: &'static [u8] = "CAN bi".as_bytes();
+
+// pub const PARAM_NAME_NODE_ID_CUTOFF: &'static [u8] = PARAM_NAME_NODE_ID[..NAME_CUTOFF];
+// pub const PARAM_NAME_DYNAMIC_ID_CUTOFF: &'static [u8] = &PARAM_NAME_DYNAMIC_ID[..NAME_CUTOFF];
+// pub const PARAM_NAME_FD_MODE_CUTOFF: &'static [u8] = &PARAM_NAME_FD_MODE[..NAME_CUTOFF];
+// pub const PARAM_NAME_BITRATE_CUTOFF: &'static [u8] = &PARAM_NAME_BITRATE[..NAME_CUTOFF];
 
 // Used to determine which enum (union) variant is used.
 // "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"

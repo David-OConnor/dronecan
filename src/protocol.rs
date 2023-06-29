@@ -425,25 +425,15 @@ pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> 
     }
 }
 
-// use defmt::println;
-
 /// Handle a new received frame. This returns true, and fills `payload` with the assembled payload
 /// if this is the last frame in a multi-frame transfer, or if it's a single-frame transfer.
 /// Returns false and doesn't modify the buffer if part of a multi-frame payload, but adjusts
 /// some atomic state variables as-required.
 pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool {
-    // Note: A more flexible API would allow passing in frame bufs instead of pointing
-    // to ours directly. See above commentd-out fn signature.
-    // let frame_bufs = &mut unsafe { broadcast::MULTI_FRAME_BUFS_RX_LEGACY };
     let frame_i = RX_FRAME_I.fetch_add(1, Ordering::Relaxed);
-
-    // let single_frame_payload = RX_FRAME_IS_SINGLE.load(Ordering::Acquire);
 
     let mut single_frame_payload = false;
     let mut rx_frame_complete = false;
-
-    // Resets the storing index for the next multi-frame payload.
-    // broadcast::RX_FRAME_COMPLETE.store(false, Ordering::Release);
 
     let frame_len = if fd_mode {
         DATA_FRAME_MAX_LEN_FD
@@ -473,7 +463,6 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
                     }
                     break;
                 } else {
-                    // println!("Unhoh; Tail byte slot is empty, but not teh end of a transfer...");
                     break;
                 }
             }
@@ -481,7 +470,7 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     } else {
         // Check the end of the frame for the tail byte.
         // todo: DRY with above tail byte check.
-        let tail_byte = TailByte::from_value(rx_buf[frame_len - 1]);
+        let tail_byte = TailByte::from_value(rx_buf[tail_byte_i]);
         if tail_byte.end_of_transfer {
             rx_frame_complete = true;
             if tail_byte.start_of_transfer {
@@ -492,7 +481,6 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
 
     // If we aren't at the end of the frame, load the data into our static buffer, and return false.
     if !rx_frame_complete {
-        // println!("Part of a multi-frame packet: {:?}", &rx_buf[..frame_len]);
         unsafe {
             if fd_mode {
                 MULTI_FRAME_BUFS_RX_FD[frame_i][..frame_len].clone_from_slice(&rx_buf[..frame_len]);
@@ -501,7 +489,6 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
                     .clone_from_slice(&rx_buf[..frame_len]);
             }
         }
-        // println!("Loaded: {:?}", &rx_buf[..frame_len]);
         return false;
     }
 
@@ -515,6 +502,9 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // If we are at the end of a multi-frame payload, compile the frame from parts, and return true.
 
     let mut payload_i = 0;
+
+    // Reset `tail_byte_i`; may have been altered during our previous use of it.
+    let tail_byte_i = frame_len - 1;
     // todo: This currently does not verify CRC.
 
     // todo: Nasty DRY here for switching buf; figure it out.
@@ -522,10 +512,8 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
         for (frame_i, frame_buf) in unsafe { MULTI_FRAME_BUFS_RX_FD }.iter().enumerate() {
             let mut frame_empty = true;
 
-            // println!("FRAMEs to compile: {:?}", frame_buf[0..frame_len]);
-
             // We use a `frame_buf` slice here since for non-FD, we still are usign 64-frame size.
-            for (word_i, word) in frame_buf[0..frame_len].iter().enumerate() {
+            for (word_i, word) in frame_buf[..frame_len].iter().enumerate() {
                 if payload_i >= payload.len() - 1 {
                     break;
                 }
@@ -574,11 +562,6 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
         }
     }
 
-    // println!("First frame buf: {:?}", frame_bufs[0]);
-    // println!("2 frame buf: {:?}", frame_bufs[1]);
-    // println!("3frame buf: {:?}", frame_bufs[2]);
-    // println!("4frame buf: {:?}", frame_bufs[3]);
-
     // These must match that defined initially.
     unsafe {
         if fd_mode {
@@ -593,6 +576,5 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
 
     RX_FRAME_I.store(0, Ordering::Release);
 
-    // println!("Completed packet: {:?}", payload[..payload_i]);
     true
 }
