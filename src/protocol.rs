@@ -31,7 +31,7 @@ pub struct ConfigCommon {
     pub fd_mode: bool,
     /// Kbps. If less than 1_000, arbitration and data bit rate are the same.
     /// If greater than 1_000, arbitration bit rate stays at 1_000 due to protocol limits
-    ///, while data bit rate is this value.
+    /// while data bit rate is this value.
     pub can_bitrate: CanBitrate,
 }
 

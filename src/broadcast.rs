@@ -1,7 +1,10 @@
 //! This module contains code related to broadcasting messages over CAN.
 //! It is hard-coded to work with our HAL.
 
-use core::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use core::{
+    mem::transmute,
+    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
+};
 
 use fdcan::{
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
@@ -38,6 +41,8 @@ type Can_ = FdCan<Can, NormalOperationMode>;
 // Note: These are only capable of handling one message at a time. This is especially notable
 // for reception.
 static mut MULTI_FRAME_BUFS_TX: [[u8; 64]; 20] = [[0; 64]; 20];
+// static mut MULTI_FRAME_BUFS_TX_FD: [[u8; 64]; 2] = [[0; 64]; 2];
+// static mut MULTI_FRAME_BUFS_TX_LEGACY: [[u8; 8]; 20] = [[0; 8]; 20];
 
 pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
 pub(crate) const DATA_FRAME_MAX_LEN_LEGACY: u8 = 8;
@@ -84,8 +89,7 @@ static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 // Rough size that includes enough room for i64 on most values, and a 40-len name field.
-// Includes extra room too.
-static mut BUF_GET_SET: [u8; 110] = [0; 110];
+static mut BUF_GET_SET: [u8; 90] = [0; 90];
 
 static mut BUF_AHRS_SOLUTION: [u8; 31] = [0; 31]; // Note: No covariance.
                                                   // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
@@ -107,7 +111,10 @@ static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use stm32_hal2::pac; // todo t
+use crate::CanError::CanHardware;
+use stm32_hal2::pac;
+
+// todo t
 /// Write out packet to the CAN peripheral.
 fn can_send(
     can: &mut Can_,
@@ -145,10 +152,10 @@ fn can_send(
         marker: None,
     };
 
-    unsafe {
-        let regs = &(*pac::FDCAN1::ptr());
-        // println!("SR: {}", regs.psr.read().bits());
-    }
+    // unsafe {
+    //     let regs = &(*pac::FDCAN1::ptr());
+    // println!("SR: {}", regs.psr.read().bits());
+    // }
     // Some example codes:
     // 1800: Good code, where no ESP is in place. Constant.
 
@@ -179,7 +186,16 @@ fn can_send(
 
     // println!("a");
     // This wait appears to be required, pending handling using a queue in the callback.
-    while !can.is_transmitter_idle() {}
+
+    let mut count: u16 = 0;
+    while !can.is_transmitter_idle() {
+        count += 1;
+        const TIMEOUT_COUNT: u16 = 10_000; // todo: What should this be?
+        if count >= TIMEOUT_COUNT {
+            println!("CAN loop timeout");
+            return err(CanError::CanHardware);
+        }
+    }
 
     // println!("b");
 

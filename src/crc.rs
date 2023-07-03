@@ -35,46 +35,6 @@ impl TransferCrc {
         for i in 0..payload_len {
             self.add_byte(payload[i]);
         }
-
-        //
-        //
-        // // It appears from experimenting, that we need to 0-pad to the length up to the tail byte.
-        // // let padded_len = crate::find_tail_byte_index(payload_len as u8);
-        //
-        // // for pl len 16, total msg len 20, padded len = 19, add 3 bytes works.
-        // // (index=18 is the last byte pre final tail. This is 3 bytes past the
-        // // last data byte.)
-        //
-        // // We must 0-pad until just prior to the final tail byte. Undocumented AFAIK.
-        // let mut bytes_left = payload_len as i16;
-        // let mut i = 0;
-        // let mut num_frames = 0;
-        //
-        // // todo: Take into account frame payload len, or this won't work on FD.
-        // while bytes_left > 0 {
-        //     if i == 0 {
-        //         // There are 5 payload bytes in the first frame,
-        //         // since the first 2 are CRC. (And last is tail)
-        //         bytes_left -= 5;
-        //     } else {
-        //         bytes_left -= 7;
-        //         // bytes_left -= crate::find_tail_byte_index(bytes_left);
-        //     }
-        //
-        //     i += 1;
-        //     num_frames += 1;
-        // }
-        //
-        // // println!("Num frames: {}, padding: {}", num_frames, -bytes_left);
-        //
-        // let padding = -bytes_left;
-        //
-        // // let last_frame_size = payload_len +
-        //
-        // // for _ in pl_len..padded_len {
-        // for _ in 0..padding {
-        //     self.add_byte(0);
-        // }
     }
 }
 
