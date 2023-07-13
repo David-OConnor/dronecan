@@ -6,19 +6,42 @@ use fdcan::{
     config as can_config,
     filter::{Action, ExtendedFilter, ExtendedFilterSlot, FilterType},
     interrupt::{Interrupt, InterruptLine},
-    FdCan, NormalOperationMode,
+    FdCan, NormalOperationMode, ConfigMode
 };
 
-use crate::CanBitrate;
+use crate::{CanBitrate, MsgType};
 
 pub type Can_ = FdCan<Can, NormalOperationMode>;
 
 use core::num::{NonZeroU16, NonZeroU8};
+use fdcan::id::{ExtendedId, Id};
 
 #[derive(Clone, Copy)]
 pub enum CanClock {
     Mhz160,
     Mhz120,
+}
+
+fn set_dronecan_id_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlot, id: u16) {
+    let filter = ExtendedFilter {
+        filter: FilterType::BitMask {
+            filter: (id as u32) << 8,
+            // "A 0 bit at the filter mask masks out the corresponding bit position of the configured ID filter,
+            // e.g. the value of the received Message ID at that bit position is not relevant for acceptance
+            // filtering. Only those bits of the received Message ID where the corresponding mask bits are
+            // one are relevant for acceptance filtering.
+            // In case all mask bits are one, a match occurs only when the received Message ID and the
+            // Message ID filter are identical. If all mask bits are 0, all Message IDs match."
+            // So, we filter the message ID field only. (bits 8 - 23)
+            mask: 0xffff << 8,
+        },
+        action: Action::StoreInFifo0,
+    };
+
+    can.set_extended_filter(
+        slot,
+        filter,
+    );
 }
 
 pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> Can_ {
@@ -67,45 +90,41 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     can.set_nominal_bit_timing(nominal_bit_timing);
     can.set_data_bit_timing(data_bit_timing);
 
-    // Accept message type ids 1 - 10
-    let filter_dronecan_standard = ExtendedFilter {
-        filter: FilterType::BitMask {
-            // todo: Do we need to shift this?
-            // filter: 0b1111 << 8,  // Message type ids 1-16.
-            filter: 0b1111, // Message type ids 1-16.
-            // "A 0 bit at the filter mask masks out the corresponding bit position of the configured ID filter,
-            // e.g. the value of the received Message ID at that bit position is not relevant for acceptance
-            // filtering. Only those bits of the received Message ID where the corresponding mask bits are
-            // one are relevant for acceptance filtering.
-            // In case all mask bits are one, a match occurs only when the received Message ID and the
-            // Message ID filter are identical. If all mask bits are 0, all Message IDs match."
-            // So, we filter the message ID field only.
-            mask: (0xffff << 8),
-        },
-        action: Action::StoreInFifo0,
-    };
+    // Node: H7 has up to 64 filters available. This is set up for G4's limitations.
+    // This `GetNodeInfo` also matches dynamic ID allocation.
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_0, MsgType::GetNodeInfo.id());
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_1, MsgType::GetSet.id());
+    // set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_2, MsgType::Restart.id());
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_3, MsgType::ConfigGnssGet.id());
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_4, MsgType::ConfigRxGet.id());
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_5, MsgType::SetConfig.id());
+    // todo: Temp TS on new ID alloc location; we need a message we can regularly recieve to initiate
+    // todo the process. (until our id filter works??)
+    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_2, MsgType::NodeStatus.id());
 
-    // Accept message type ids 3_110 and 3_111.
-    let _filter_custom = ExtendedFilter {
+    // todo: We appear to receive this message even without enabling this filter...
+    // Dynamic ID allocation is a service message, which uses a different CAN ID format.
+    let filter_id_alloc = ExtendedFilter {
         filter: FilterType::BitMask {
-            filter: 0x0,
-            mask: (0xffff << 8),
+            // or the 8-bit id field = 1 with 1 in bit 7: indicating a service message.
+            filter: (1 << 16) | (1 << 7),
+            mask: (0xff << 16) | (1 << 7),
         },
         action: Action::StoreInFifo0,
     };
 
     can.set_extended_filter(
-        ExtendedFilterSlot::_0,
-        ExtendedFilter::accept_all_into_fifo0(),
+        ExtendedFilterSlot::_6,
+        filter_id_alloc,
     );
 
-    // can.set_extended_filter(ExtendedFilterSlot::_0, filter_dronecan_standard);
-
-    // todo: Figure out how it works.
-    // can.set_extended_filter(
-    //     ExtendedFilterSlot::_1,
-    //     filter_custom,
-    // );
+    // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
+    // by our dronecan ID filters.
+    let reject_filter = ExtendedFilter::reject_all();
+    can.set_extended_filter(
+        ExtendedFilterSlot::_7,
+        reject_filter,
+    );
 
     can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
 
