@@ -6,7 +6,7 @@ use fdcan::{
     config as can_config,
     filter::{Action, ExtendedFilter, ExtendedFilterSlot, FilterType},
     interrupt::{Interrupt, InterruptLine},
-    FdCan, NormalOperationMode, ConfigMode
+    ConfigMode, FdCan, NormalOperationMode,
 };
 
 use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
@@ -22,7 +22,12 @@ pub enum CanClock {
     Mhz120,
 }
 
-fn set_dronecan_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlot, frame_type: FrameType, id: u16) {
+fn set_dronecan_filter(
+    can: &mut FdCan<Can, ConfigMode>,
+    slot: ExtendedFilterSlot,
+    frame_type: FrameType,
+    id: u16,
+) {
     let filter_type = match frame_type {
         FrameType::Message => {
             FilterType::BitMask {
@@ -37,13 +42,11 @@ fn set_dronecan_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlo
                 mask: 0xffff << 8,
             }
         }
-        FrameType::Service(_) => {
-            FilterType::BitMask {
-                filter: ((id as u32) << 16) | (1 << 7),
-                mask: (0xff << 16) | (1 << 7),
-            }
-        }
-        FrameType::MessageAnon => unimplemented!()
+        FrameType::Service(_) => FilterType::BitMask {
+            filter: ((id as u32) << 16) | (1 << 7),
+            mask: (0xff << 16) | (1 << 7),
+        },
+        FrameType::MessageAnon => unimplemented!(),
     };
 
     let filter = ExtendedFilter {
@@ -51,10 +54,7 @@ fn set_dronecan_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlo
         action: Action::StoreInFifo0,
     };
 
-    can.set_extended_filter(
-        slot,
-        filter,
-    );
+    can.set_extended_filter(slot, filter);
 }
 
 pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> Can_ {
@@ -111,24 +111,56 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
         req_or_resp: RequestResponse::Request,
     };
 
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_0, FrameType::Service(s), MsgType::GetNodeInfo.id());
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_1, FrameType::Service(s), MsgType::IdAllocation.id());
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_2, FrameType::Service(s), MsgType::GetSet.id());
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_0,
+        FrameType::Service(s),
+        MsgType::GetNodeInfo.id(),
+    );
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_1,
+        FrameType::Message,
+        MsgType::IdAllocation.id(),
+    );
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_2,
+        FrameType::Service(s),
+        MsgType::GetSet.id(),
+    );
     // set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Service(s), MsgType::Restart.id());
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_4, FrameType::Service(s), MsgType::ConfigGnssGet.id());
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_5, FrameType::Service(s), MsgType::ConfigRxGet.id());
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_6, FrameType::Service(s), MsgType::SetConfig.id());
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_4,
+        FrameType::Service(s),
+        MsgType::ConfigGnssGet.id(),
+    );
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_5,
+        FrameType::Service(s),
+        MsgType::ConfigRxGet.id(),
+    );
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_6,
+        FrameType::Service(s),
+        MsgType::SetConfig.id(),
+    );
     // todo: Temp TS on new ID alloc location; we need a message we can regularly recieve to initiate
     // todo the process. (until our id filter works??)
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Message, MsgType::NodeStatus.id());
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_3,
+        FrameType::Message,
+        MsgType::NodeStatus.id(),
+    );
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
     let reject_filter = ExtendedFilter::reject_all();
-    can.set_extended_filter(
-        ExtendedFilterSlot::_7,
-        reject_filter,
-    );
+    can.set_extended_filter(ExtendedFilterSlot::_7, reject_filter);
 
     can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
 

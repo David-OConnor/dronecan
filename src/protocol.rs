@@ -5,9 +5,12 @@ use stm32_hal2::rng;
 
 use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
 
+const MAX_RX_FRAMES_LEGACY: usize = 24;
+const MAX_RX_FRAMES_FD: usize = 3;
+
 // This one may be accessed by applications directly.
-pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; 20] = [[0; 8]; 20];
-pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; 3] = [[0; 64]; 3];
+pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; MAX_RX_FRAMES_LEGACY] = [[0; 8]; MAX_RX_FRAMES_LEGACY];
+pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; MAX_RX_FRAMES_FD] = [[0; 64]; MAX_RX_FRAMES_FD];
 
 // todo: DRY from braodcast
 pub(crate) const DATA_FRAME_MAX_LEN_FD: u8 = 64;
@@ -483,10 +486,15 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     if !rx_frame_complete {
         unsafe {
             if fd_mode {
-                MULTI_FRAME_BUFS_RX_FD[frame_i][..frame_len].clone_from_slice(&rx_buf[..frame_len]);
+                if frame_i < MULTI_FRAME_BUFS_RX_FD.len() {
+                    MULTI_FRAME_BUFS_RX_FD[frame_i][..frame_len]
+                        .clone_from_slice(&rx_buf[..frame_len]);
+                }
             } else {
-                MULTI_FRAME_BUFS_RX_LEGACY[frame_i][..frame_len]
-                    .clone_from_slice(&rx_buf[..frame_len]);
+                if frame_i < MULTI_FRAME_BUFS_RX_LEGACY.len() {
+                    MULTI_FRAME_BUFS_RX_LEGACY[frame_i][..frame_len]
+                        .clone_from_slice(&rx_buf[..frame_len]);
+                }
             }
         }
         return false;
@@ -565,9 +573,9 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
     // These must match that defined initially.
     unsafe {
         if fd_mode {
-            MULTI_FRAME_BUFS_RX_FD = [[0; 64]; 3];
+            MULTI_FRAME_BUFS_RX_FD = [[0; 64]; MAX_RX_FRAMES_FD];
         } else {
-            MULTI_FRAME_BUFS_RX_LEGACY = [[0; 8]; 20];
+            MULTI_FRAME_BUFS_RX_LEGACY = [[0; 8]; MAX_RX_FRAMES_LEGACY];
         }
     }
     // Zero-out for next use.
