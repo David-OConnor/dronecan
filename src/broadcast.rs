@@ -91,11 +91,11 @@ static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 // Rough size that includes enough room for i64 on most values, and a 40-len name field.
 static mut BUF_GET_SET: [u8; 90] = [0; 90];
 
-static mut BUF_AHRS_SOLUTION: [u8; 31] = [0; 31]; // Note: No covariance.
+static mut BUF_AHRS_SOLUTION: [u8; 48] = [0; 48]; // Note: No covariance.
                                                   // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
                                                   // Potentially need size 12 for mag strength in FD mode, even with no cov.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 12] = [0; 12]; // Note: No covariance.
-static mut BUF_RAW_IMU: [u8; 48] = [0; 48]; // Note: No covariance.
+static mut BUF_RAW_IMU: [u8; 64] = [0; 64]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
@@ -111,7 +111,7 @@ static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use crate::CanError::Hardware;
+use crate::CanError::{Hardware, PayloadSize};
 use stm32_hal2::pac;
 
 // todo t
@@ -355,14 +355,11 @@ pub fn broadcast(
     let tail_byte = make_tail_byte(TransferComponent::SingleFrame, transfer_id);
     let tail_byte_i = find_tail_byte_index(payload_len as u8);
 
-    payload[tail_byte_i] = tail_byte.value();
+    if tail_byte_i >= payload.len() {
+        return Err(CanError::PayloadSize);
+    }
 
-    // if message_type_id == messages::DATA_TYPE_ID_NODE_STATUS {
-    //     println!("Node status. tail i: {}, Tail: s{} e{} val{}",
-    //              tail_byte_i, tail_byte.start_of_transfer, tail_byte.end_of_transfer, tail_byte.value());
-    //
-    //     println!("PL: {:?}", payload);
-    // }
+    payload[tail_byte_i] = tail_byte.value();
 
     payload[tail_byte_i] = tail_byte.value();
 
@@ -804,6 +801,12 @@ pub fn publish_raw_imu(
 
     let transfer_id = TRANSFER_ID_RAW_IMU.fetch_add(1, Ordering::Relaxed);
 
+    let payload_size = if fd_mode {
+        m_type.payload_size() + 1 // Due to no TCO on final cov array.
+    } else {
+        m_type.payload_size()
+    };
+
     broadcast(
         can,
         FrameType::Message,
@@ -812,7 +815,7 @@ pub fn publish_raw_imu(
         transfer_id as u8,
         buf,
         fd_mode,
-        None,
+        Some(payload_size as usize),
     )
 }
 
