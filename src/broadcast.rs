@@ -111,7 +111,7 @@ static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use crate::CanError::CanHardware;
+use crate::CanError::Hardware;
 use stm32_hal2::pac;
 
 // todo t
@@ -194,7 +194,7 @@ fn can_send(
                 let regs = &(*pac::FDCAN1::ptr());
                 println!("SR: {}", regs.psr.read().bits());
             }
-            return Err(CanError::CanHardware);
+            return Err(CanError::Hardware);
         }
     }
 
@@ -205,7 +205,7 @@ fn can_send(
 
     match can.transmit_preserve(frame_header, frame_data, &mut message_pending_handler) {
         Ok(_) => Ok(()),
-        Err(e) => Err(CanError::CanHardware),
+        Err(e) => Err(CanError::Hardware),
     }
 }
 
@@ -1197,6 +1197,6 @@ pub fn get_frame_info(
             ReceiveOverrun::NoOverrun(frame_info) => Ok(frame_info),
             ReceiveOverrun::Overrun(frame_info) => Ok(frame_info),
         },
-        Err(_) => Err(CanError::CanHardware),
+        Err(_) => Err(CanError::Hardware),
     }
 }

@@ -54,7 +54,7 @@ pub fn bit_size_to_byte_size(len_bits: usize) -> usize {
 
 #[derive(Clone, Copy)]
 pub enum CanError {
-    CanHardware,
+    Hardware,
     PayloadSize,
     FrameSize,
     PayloadData,

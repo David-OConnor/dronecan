@@ -9,7 +9,8 @@ const MAX_RX_FRAMES_LEGACY: usize = 24;
 const MAX_RX_FRAMES_FD: usize = 3;
 
 // This one may be accessed by applications directly.
-pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; MAX_RX_FRAMES_LEGACY] = [[0; 8]; MAX_RX_FRAMES_LEGACY];
+pub static mut MULTI_FRAME_BUFS_RX_LEGACY: [[u8; 8]; MAX_RX_FRAMES_LEGACY] =
+    [[0; 8]; MAX_RX_FRAMES_LEGACY];
 pub static mut MULTI_FRAME_BUFS_RX_FD: [[u8; 64]; MAX_RX_FRAMES_FD] = [[0; 64]; MAX_RX_FRAMES_FD];
 
 // todo: DRY from braodcast
@@ -23,9 +24,9 @@ pub static RX_FRAME_I: AtomicUsize = AtomicUsize::new(0);
 /// DroneCAN spec.
 pub struct ConfigCommon {
     /// Used to distinguish between multiple instances of this device. Stored in
-    /// flash. Must be configured without any other instances of this device connected to the bus.
-    /// Defaults to 0, which allows ID to be configured via the DroneCAN node assignment procedure.
-    /// Can be overwritten, eg by the user, to force a specific ID for use outside that system.
+    /// flash. If dyanmic id allocation is enabled, this is overwritten, but passed as
+    /// the desired ID. If not, it is the node ID.
+    /// Defaults to 69.
     pub node_id: u8,
     /// If true, the `node_id` field is a desired ID; get ID from an allocator.
     /// if false, hard-set the node id field. Defaults to `true`.
@@ -43,7 +44,7 @@ impl Default for ConfigCommon {
         Self {
             // Between 1 and 127. Initialize to 0; this is expected by AP and
             // Px4, where id is assigned through a node ID server.
-            node_id: 0,
+            node_id: 69,
             dynamic_id_allocation: true,
             fd_mode: false,
             can_bitrate: CanBitrate::default(),

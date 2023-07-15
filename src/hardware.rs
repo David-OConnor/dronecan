@@ -148,7 +148,7 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
         FrameType::Service(s),
         MsgType::SetConfig.id(),
     );
-    // todo: Temp TS on new ID alloc location; we need a message we can regularly recieve to initiate
+    // todo: Temp realloc location; we need a message we can regularly recieve to initiate
     // todo the process. (until our id filter works??)
     set_dronecan_filter(
         &mut can,
