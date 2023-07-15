@@ -149,7 +149,7 @@ pub enum FrameType {
 }
 
 /// Data present in services, but not messages.
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub struct ServiceData {
     pub dest_node_id: u8, // 7 bits
     pub req_or_resp: RequestResponse,

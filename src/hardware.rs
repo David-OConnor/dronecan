@@ -9,7 +9,7 @@ use fdcan::{
     FdCan, NormalOperationMode, ConfigMode
 };
 
-use crate::{CanBitrate, MsgType};
+use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
 
 pub type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -22,19 +22,32 @@ pub enum CanClock {
     Mhz120,
 }
 
-fn set_dronecan_id_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlot, id: u16) {
+fn set_dronecan_filter(can: &mut FdCan<Can, ConfigMode>, slot: ExtendedFilterSlot, frame_type: FrameType, id: u16) {
+    let filter_type = match frame_type {
+        FrameType::Message => {
+            FilterType::BitMask {
+                filter: (id as u32) << 8,
+                // "A 0 bit at the filter mask masks out the corresponding bit position of the configured ID filter,
+                // e.g. the value of the received Message ID at that bit position is not relevant for acceptance
+                // filtering. Only those bits of the received Message ID where the corresponding mask bits are
+                // one are relevant for acceptance filtering.
+                // In case all mask bits are one, a match occurs only when the received Message ID and the
+                // Message ID filter are identical. If all mask bits are 0, all Message IDs match."
+                // So, we filter the message ID field only. (bits 8 - 23)
+                mask: 0xffff << 8,
+            }
+        }
+        FrameType::Service(_) => {
+            FilterType::BitMask {
+                filter: ((id as u32) << 16) | (1 << 7),
+                mask: (0xff << 16) | (1 << 7),
+            }
+        }
+        FrameType::MessageAnon => unimplemented!()
+    };
+
     let filter = ExtendedFilter {
-        filter: FilterType::BitMask {
-            filter: (id as u32) << 8,
-            // "A 0 bit at the filter mask masks out the corresponding bit position of the configured ID filter,
-            // e.g. the value of the received Message ID at that bit position is not relevant for acceptance
-            // filtering. Only those bits of the received Message ID where the corresponding mask bits are
-            // one are relevant for acceptance filtering.
-            // In case all mask bits are one, a match occurs only when the received Message ID and the
-            // Message ID filter are identical. If all mask bits are 0, all Message IDs match."
-            // So, we filter the message ID field only. (bits 8 - 23)
-            mask: 0xffff << 8,
-        },
+        filter: filter_type,
         action: Action::StoreInFifo0,
     };
 
@@ -92,31 +105,22 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
 
     // Node: H7 has up to 64 filters available. This is set up for G4's limitations.
     // This `GetNodeInfo` also matches dynamic ID allocation.
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_0, MsgType::GetNodeInfo.id());
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_1, MsgType::GetSet.id());
-    // set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_2, MsgType::Restart.id());
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_3, MsgType::ConfigGnssGet.id());
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_4, MsgType::ConfigRxGet.id());
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_5, MsgType::SetConfig.id());
-    // todo: Temp TS on new ID alloc location; we need a message we can regularly recieve to initiate
-    // todo the process. (until our id filter works??)
-    set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_2, MsgType::NodeStatus.id());
 
-    // todo: We appear to receive this message even without enabling this filter...
-    // Dynamic ID allocation is a service message, which uses a different CAN ID format.
-    let filter_id_alloc = ExtendedFilter {
-        filter: FilterType::BitMask {
-            // or the 8-bit id field = 1 with 1 in bit 7: indicating a service message.
-            filter: (1 << 16) | (1 << 7),
-            mask: (0xff << 16) | (1 << 7),
-        },
-        action: Action::StoreInFifo0,
+    let s = ServiceData {
+        dest_node_id: 0, // 7 bits
+        req_or_resp: RequestResponse::Request,
     };
 
-    can.set_extended_filter(
-        ExtendedFilterSlot::_6,
-        filter_id_alloc,
-    );
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_0, FrameType::Service(s), MsgType::GetNodeInfo.id());
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_1, FrameType::Service(s), MsgType::IdAllocation.id());
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_2, FrameType::Service(s), MsgType::GetSet.id());
+    // set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Service(s), MsgType::Restart.id());
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_4, FrameType::Service(s), MsgType::ConfigGnssGet.id());
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_5, FrameType::Service(s), MsgType::ConfigRxGet.id());
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_6, FrameType::Service(s), MsgType::SetConfig.id());
+    // todo: Temp TS on new ID alloc location; we need a message we can regularly recieve to initiate
+    // todo the process. (until our id filter works??)
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Message, MsgType::NodeStatus.id());
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
