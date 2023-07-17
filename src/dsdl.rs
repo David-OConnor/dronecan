@@ -20,6 +20,10 @@ pub const PARAM_NAME_DYNAMIC_ID: &'static [u8] = "Dynamic ID allocation".as_byte
 pub const PARAM_NAME_FD_MODE: &'static [u8] = "CAN FD enabled".as_bytes();
 pub const PARAM_NAME_BITRATE: &'static [u8] = "CAN bitrate (see datasheet)".as_bytes();
 
+// This message is sent by Ardupilot; respond with 0 unless you wish to limit
+// or inhibit GPS.
+pub const PARAM_NAME_GPS_TYPE: &'static [u8] = "GPS_TYPE".as_bytes();
+
 // Used to determine which enum (union) variant is used.
 // "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"
 const VALUE_TAG_BIT_LEN: usize = 3;

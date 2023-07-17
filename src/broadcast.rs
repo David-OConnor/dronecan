@@ -100,7 +100,7 @@ static mut BUF_PRESSURE: [u8; 8] = [0; 8];
 static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
-static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 128] = [0; 128];
+static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 90] = [0; 90];
 
 // This buffer accomodates up to 16 12-bit channels. (224 bits or 28 bytes)
 static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
@@ -835,6 +835,13 @@ pub fn publish_global_navigation_solution(
 
     let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
 
+    let payload_size = if fd_mode {
+        m_type.payload_size() + 1 // Due to no TCO on final cov array.
+    } else {
+        m_type.payload_size()
+    };
+
+    println!("A");
     broadcast(
         can,
         FrameType::Message,
@@ -843,8 +850,11 @@ pub fn publish_global_navigation_solution(
         transfer_id as u8,
         buf,
         fd_mode,
-        None,
-    )
+        Some(payload_size as usize),
+    );
+
+    println!("B");
+    Ok(())
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/gnss/1061.Auxiliary.uavcan
