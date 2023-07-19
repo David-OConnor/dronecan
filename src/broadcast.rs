@@ -437,27 +437,38 @@ pub fn publish_node_info(
         return Err(CanError::PayloadData);
     }
 
+    // println!("Node name: {:?}", node_name);
+
     buf[..7].clone_from_slice(&status.to_bytes());
     buf[7..22].clone_from_slice(&software_version.to_bytes());
     buf[22..41].clone_from_slice(&hardware_version.to_bytes());
 
-    // Important: In legacy mode, there is no node len field for node info, due to tail array
+    // Important: In legacy mode, there is no node len field for name, due to tail array
     // optimization; We jump right into the byte representation.
     // In FD mode, a 7-bit node len field is required.
+
+    // From experiments, doesn't seem to need 1 added for FD with currently tested
+    // inputs?
+    let payload_size = m_type.payload_size() as usize + node_name.len();
+
     if fd_mode {
         let bits = buf.view_bits_mut::<Msb0>();
 
         let mut i_bit = 41 * 8;
+
         bits[i_bit..i_bit + 7].store_le(node_name.len() as u8);
         i_bit += 7;
 
         for char in node_name {
-            bits[i_bit..i_bit + 8].store_le(*char);
+            // Why big endian? Not sure, but by trial+error, this is it.
+            bits[i_bit..i_bit + 8].store_be(*char);
             i_bit += 8;
         }
     } else {
         buf[41..41 + node_name.len()].clone_from_slice(node_name);
     }
+
+    // println!("Buf: {:?}", buf);
 
     let transfer_id = TRANSFER_ID_NODE_INFO.fetch_add(1, Ordering::Relaxed);
 
@@ -474,7 +485,7 @@ pub fn publish_node_info(
         transfer_id as u8,
         buf,
         fd_mode,
-        Some(m_type.payload_size() as usize + node_name.len()),
+        Some(payload_size),
     )
 }
 
@@ -833,15 +844,17 @@ pub fn publish_global_navigation_solution(
 
     buf[..m_type.payload_size() as usize].clone_from_slice(&data.pack().unwrap());
 
-    let transfer_id = TRANSFER_ID_MAGNETIC_FIELD_STRENGTH2.fetch_add(1, Ordering::Relaxed);
+    let transfer_id = TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION.fetch_add(1, Ordering::Relaxed);
 
     let payload_size = if fd_mode {
+        buf[88] = 0; // todo temp TS
+        buf[87] = 0; // todo temp TS
+        buf[89] = 0; // todo temp TS
         m_type.payload_size() + 1 // Due to no TCO on final cov array.
     } else {
         m_type.payload_size()
     };
 
-    println!("A");
     broadcast(
         can,
         FrameType::Message,
@@ -851,10 +864,7 @@ pub fn publish_global_navigation_solution(
         buf,
         fd_mode,
         Some(payload_size as usize),
-    );
-
-    println!("B");
-    Ok(())
+    )
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/gnss/1061.Auxiliary.uavcan
