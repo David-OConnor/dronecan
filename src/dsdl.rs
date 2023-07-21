@@ -317,8 +317,6 @@ impl<'a> GetSetRequest<'a> {
             MAX_GET_SET_NAME_LEN // max name len we use
         };
 
-        // println!("Name len: {:?}", name_len);
-
         let mut name = [0; MAX_GET_SET_NAME_LEN];
 
         if name_len as usize > name.len() {
@@ -326,7 +324,8 @@ impl<'a> GetSetRequest<'a> {
         }
 
         for char_i in 0..name_len {
-            name[char_i] = bits[current_i..current_i + 8].load_le::<u8>();
+            // todo: Why BE here? confirm this is the same for non-FD mode.
+            name[char_i] = bits[current_i..current_i + 8].load_be::<u8>();
             current_i += 8;
         }
 
@@ -387,8 +386,10 @@ impl<'a> GetSetResponse<'a> {
             current_i
         };
 
-        for char in self.name {
-            bits[i_bit..i_bit + 8].store_le(char);
+        println!("i_bit at name start (should be 36*8=288: {}", i_bit);
+
+        for char in &self.name[..self.name_len] {
+            bits[i_bit..i_bit + 8].store_be(*char);
             i_bit += 8;
         }
 

@@ -89,6 +89,7 @@ static mut BUF_NODE_STATUS: [u8; 8] = [0; 8];
 static mut BUF_TIME_SYNC: [u8; 8] = [0; 8];
 static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 // Rough size that includes enough room for i64 on most values, and a 40-len name field.
+// Also long enough to support padding to the tail byte of 32-len for a 2-frame FD transfer.
 static mut BUF_GET_SET: [u8; 90] = [0; 90];
 
 static mut BUF_AHRS_SOLUTION: [u8; 48] = [0; 48]; // Note: No covariance.
@@ -449,7 +450,7 @@ pub fn publish_node_info(
 
     // From experiments, doesn't seem to need 1 added for FD with currently tested
     // inputs?
-    let payload_size = m_type.payload_size() as usize + node_name.len();
+    let mut payload_size = m_type.payload_size() as usize + node_name.len();
 
     if fd_mode {
         let bits = buf.view_bits_mut::<Msb0>();
@@ -461,9 +462,12 @@ pub fn publish_node_info(
 
         for char in node_name {
             // Why big endian? Not sure, but by trial+error, this is it.
+            // todo: Why BE here? Confirm in non-FD it's the same
             bits[i_bit..i_bit + 8].store_be(*char);
             i_bit += 8;
         }
+
+        payload_size += 1;
     } else {
         buf[41..41 + node_name.len()].clone_from_slice(node_name);
     }
@@ -847,9 +851,6 @@ pub fn publish_global_navigation_solution(
     let transfer_id = TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION.fetch_add(1, Ordering::Relaxed);
 
     let payload_size = if fd_mode {
-        buf[88] = 0; // todo temp TS
-        buf[87] = 0; // todo temp TS
-        buf[89] = 0; // todo temp TS
         m_type.payload_size() + 1 // Due to no TCO on final cov array.
     } else {
         m_type.payload_size()
