@@ -1,8 +1,8 @@
 //! Code for the CRC and data type signature, used in multi-frame transfers.
 
 const CRC_POLY: u16 = 0x1021;
-const SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
-const SIGNATURE_MASK64: u64 = 0xFFFF_FFFF_FFFF_FFFF;
+const _SIGNATURE_POLY: u64 = 0x42F0_E1EB_A9EA_3693;
+const _SIGNATURE_MASK64: u64 = 0xFFFF_FFFF_FFFF_FFFF;
 
 /// Code for computing CRC for multi-frame transfers:
 /// Adapted from https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/
@@ -31,7 +31,7 @@ impl TransferCrc {
         }
     }
 
-    pub fn add_payload(&mut self, payload: &[u8], payload_len: usize, frame_payload_len: usize) {
+    pub fn add_payload(&mut self, payload: &[u8], payload_len: usize) {
         for i in 0..payload_len {
             self.add_byte(payload[i]);
         }
@@ -66,8 +66,8 @@ pub struct _Signature {
 impl _Signature {
     pub fn _new(extend_from: Option<u64>) -> Self {
         let crc = match extend_from {
-            Some(e) => (e & SIGNATURE_MASK64) ^ SIGNATURE_MASK64,
-            None => SIGNATURE_MASK64,
+            Some(e) => (e & _SIGNATURE_MASK64) ^ _SIGNATURE_MASK64,
+            None => _SIGNATURE_MASK64,
         };
 
         Self { crc }
@@ -75,11 +75,11 @@ impl _Signature {
 
     pub fn _add(&mut self, data_bytes: &[u8]) {
         for byte in data_bytes {
-            self.crc ^= ((*byte as u64) << 56) & SIGNATURE_MASK64;
+            self.crc ^= ((*byte as u64) << 56) & _SIGNATURE_MASK64;
 
             for _ in 0..8 {
                 if self.crc & (1 << 63) != 0 {
-                    self.crc = ((self.crc << 1) & SIGNATURE_MASK64) ^ SIGNATURE_POLY;
+                    self.crc = ((self.crc << 1) & _SIGNATURE_MASK64) ^ _SIGNATURE_POLY;
                 } else {
                     self.crc <<= 1;
                 }
@@ -88,6 +88,6 @@ impl _Signature {
     }
 
     pub fn _value(&self) -> u64 {
-        (self.crc & SIGNATURE_MASK64) ^ SIGNATURE_MASK64
+        (self.crc & _SIGNATURE_MASK64) ^ _SIGNATURE_MASK64
     }
 }

@@ -1,10 +1,7 @@
 //! This module contains code related to broadcasting messages over CAN.
 //! It is hard-coded to work with our HAL.
 
-use core::{
-    mem::transmute,
-    sync::atomic::{AtomicBool, AtomicUsize, Ordering},
-};
+use core::sync::atomic::{AtomicUsize, Ordering};
 
 use fdcan::{
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
@@ -12,7 +9,7 @@ use fdcan::{
     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
 
-use stm32_hal2::{can::Can, dma::DmaInterrupt::TransferComplete, rng};
+use stm32_hal2::can::Can;
 
 use bitvec::prelude::*;
 
@@ -28,7 +25,7 @@ use crate::{
     gnss::{FixDronecan, GlobalNavSolution, GnssAuxiliary},
     make_tail_byte,
     messages::MsgType,
-    protocol::{CanId, FrameType, MsgPriority, RequestResponse, ServiceData, TransferComponent},
+    protocol::{CanId, FrameType, RequestResponse, ServiceData, TransferComponent},
     CanError,
 };
 
@@ -112,7 +109,6 @@ static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use crate::CanError::{Hardware, PayloadSize};
 use stm32_hal2::pac;
 
 // todo t
@@ -146,10 +142,8 @@ fn can_send(
         len: frame_data_len,
         frame_format,
         id,
-        // todo: Bit-rate switching set to true causes FD frames not to be
-        // todo received by DC.
-        // todo: Leave it off UFN.
-        bit_rate_switching: false,
+        // bit_rate_switching: false,
+        bit_rate_switching: true,
         marker: None,
     };
 
@@ -181,7 +175,6 @@ fn can_send(
     // 617:
     // 618:
 
-    // println!("a");
     // This wait appears to be required, pending handling using a queue in the callback.
 
     let mut count: u16 = 0;
@@ -195,18 +188,17 @@ fn can_send(
                 let regs = &(*pac::FDCAN1::ptr());
                 println!("SR: {}", regs.psr.read().bits());
             }
+
             return Err(CanError::Hardware);
         }
     }
-
-    // println!("b");
 
     // Not sure if this helps or is required etc.
     // atomic::compiler_fence(Ordering::SeqCst);
 
     match can.transmit_preserve(frame_header, frame_data, &mut message_pending_handler) {
         Ok(_) => Ok(()),
-        Err(e) => Err(CanError::Hardware),
+        Err(_e) => Err(CanError::Hardware),
     }
 }
 
@@ -228,7 +220,7 @@ fn send_multiple_frames(
     };
 
     let mut crc = TransferCrc::new(base_crc);
-    crc.add_payload(payload, payload_len as usize, frame_payload_len);
+    crc.add_payload(payload, payload_len as usize);
 
     // We use slices of the FD buf, even for legacy frames, to keep code simple.
     let bufs = unsafe { &mut MULTI_FRAME_BUFS_TX };
@@ -289,7 +281,7 @@ fn send_multiple_frames(
             can,
             can_id,
             // &bufs[active_frame][..tail_byte_i + 1],
-            &bufs[active_frame][..tail_byte_i as usize + 1],
+            &bufs[active_frame][..tail_byte_i + 1],
             tail_byte_i as u8 + 1,
             fd_mode,
         )?;
@@ -298,7 +290,7 @@ fn send_multiple_frames(
         active_frame += 1;
     }
 
-    return Ok(());
+    Ok(())
 }
 
 /// Send a DroneCAN "broadcast" message. See [The DroneCAN spec, transport layer page](https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/)
@@ -341,11 +333,11 @@ pub fn broadcast(
     // The transfer payload is up to 7 bytes for non-FD DRONECAN.
     // If data is longer than a single frame, set up a multi-frame transfer.
     // We subtract one to accomodate the tail byte.
-    if payload_len as u16 > (frame_payload_len - 1) as u16 {
+    if payload_len > (frame_payload_len - 1) as u16 {
         return send_multiple_frames(
             can,
             payload,
-            payload_len as u16,
+            payload_len,
             can_id.value(),
             transfer_id,
             fd_mode,
@@ -1070,12 +1062,10 @@ pub fn request_id_allocation_req(
     // 6 bytes of unique_id unless in the final stage; then 4.
     let len = if fd_mode {
         m_type.payload_size() as usize
+    } else if data.stage == 2 {
+        5
     } else {
-        if data.stage == 2 {
-            5
-        } else {
-            7
-        }
+        7
     };
 
     broadcast(
@@ -1131,7 +1121,7 @@ pub fn publish_getset_resp(
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
-pub fn handle_time_sync(
+pub fn _handle_time_sync(
     can: &mut Can_,
     payload: &[u8],
     fd_mode: bool,

@@ -31,8 +31,6 @@ pub use protocol::*;
 #[cfg(feature = "hal")]
 pub use broadcast::*;
 
-use crate::crc::TransferCrc;
-
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
@@ -172,7 +170,7 @@ impl f16 {
             // Check mantissa for what we can do
             if 14 - half_exp > 24 {
                 // No rounding possibility, so this is a full underflow, return signed zero
-                return return Self {
+                return Self {
                     bits: half_sign as u16,
                 };
             }
@@ -185,7 +183,7 @@ impl f16 {
                 half_man += 1;
             }
             // No exponent for subnormals
-            return return Self {
+            return Self {
                 bits: (half_sign | half_man) as u16,
             };
         }

@@ -320,7 +320,7 @@ impl CanId {
                 result |= (discriminator << 10) | ((self.type_id & 0b11) as u32) << 8;
             }
             FrameType::Service(service_data) => {
-                result |= (((self.type_id & 0xffff) as u32) << 16)
+                result |= ((self.type_id as u32) << 16)
                     | ((service_data.req_or_resp as u8 as u32) << 15)
                     | (((service_data.dest_node_id & 0b111_1111) as u32) << 8)
             }
@@ -491,11 +491,9 @@ pub fn handle_frame_rx(rx_buf: &[u8], payload: &mut [u8], fd_mode: bool) -> bool
                     MULTI_FRAME_BUFS_RX_FD[frame_i][..frame_len]
                         .clone_from_slice(&rx_buf[..frame_len]);
                 }
-            } else {
-                if frame_i < MULTI_FRAME_BUFS_RX_LEGACY.len() {
-                    MULTI_FRAME_BUFS_RX_LEGACY[frame_i][..frame_len]
-                        .clone_from_slice(&rx_buf[..frame_len]);
-                }
+            } else if frame_i < MULTI_FRAME_BUFS_RX_LEGACY.len() {
+                MULTI_FRAME_BUFS_RX_LEGACY[frame_i][..frame_len]
+                    .clone_from_slice(&rx_buf[..frame_len]);
             }
         }
         return false;

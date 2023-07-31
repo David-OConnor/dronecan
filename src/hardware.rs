@@ -14,7 +14,6 @@ use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
 pub type Can_ = FdCan<Can, NormalOperationMode>;
 
 use core::num::{NonZeroU16, NonZeroU8};
-use fdcan::id::{ExtendedId, Id};
 
 #[derive(Clone, Copy)]
 pub enum CanClock {

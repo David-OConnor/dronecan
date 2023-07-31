@@ -14,15 +14,14 @@ use crate::{protocol::ConfigCommon, CanError, MsgType, PAYLOAD_SIZE_NODE_STATUS}
 // To simplify some logic re trailing values, we only match the first few characters of the param name.
 pub const NAME_CUTOFF: usize = 6;
 
-pub const PARAM_NAME_NODE_ID: &'static [u8] =
-    "Node ID (desired if dynamic allocation is set)".as_bytes();
-pub const PARAM_NAME_DYNAMIC_ID: &'static [u8] = "Dynamic ID allocation".as_bytes();
-pub const PARAM_NAME_FD_MODE: &'static [u8] = "CAN FD enabled".as_bytes();
-pub const PARAM_NAME_BITRATE: &'static [u8] = "CAN bitrate (see datasheet)".as_bytes();
+pub const PARAM_NAME_NODE_ID: &[u8] = "Node ID (desired if dynamic allocation is set)".as_bytes();
+pub const PARAM_NAME_DYNAMIC_ID: &[u8] = "Dynamic ID allocation".as_bytes();
+pub const PARAM_NAME_FD_MODE: &[u8] = "CAN FD enabled".as_bytes();
+pub const PARAM_NAME_BITRATE: &[u8] = "CAN bitrate (see datasheet)".as_bytes();
 
 // This message is sent by Ardupilot; respond with 0 unless you wish to limit
 // or inhibit GPS.
-pub const PARAM_NAME_GPS_TYPE: &'static [u8] = "GPS_TYPE".as_bytes();
+pub const PARAM_NAME_GPS_TYPE: &[u8] = "GPS_TYPE".as_bytes();
 
 // Used to determine which enum (union) variant is used.
 // "Tag is 3 bit long, so outer structure has 5-bit prefix to ensure proper alignment"
@@ -386,8 +385,6 @@ impl<'a> GetSetResponse<'a> {
             current_i
         };
 
-        println!("i_bit at name start (should be 36*8=288: {}", i_bit);
-
         for char in &self.name[..self.name_len] {
             bits[i_bit..i_bit + 8].store_be(*char);
             i_bit += 8;
@@ -399,56 +396,56 @@ impl<'a> GetSetResponse<'a> {
     pub fn from_bytes(buf: &[u8]) -> Result<Self, CanError> {
         let bits = buf.view_bits::<Msb0>();
 
-        return unimplemented!(); // todo: You just need to work thorugh it like with related.
-                                 //
-                                 // let val_tag_start_i = 5;
-                                 // let (value, current_i) = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
-                                 //
-                                 //
-                                 // // todo: Max, min and default values
-                                 // let default_value = Value::Empty;
-                                 //
-                                 // let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
-                                 //
-                                 // let max_value = NumericValue::Empty;
-                                 // let max_value_size = 0; // todo
-                                 //
-                                 // let min_value = NumericValue::Empty;
-                                 // let min_value_size = 0; // todo
-                                 // // 2 is tag size of numeric value.
-                                 // let min_value_i = max_value_i + 2 + max_value_size + 6;
-                                 //
-                                 // // todo: Update once you include default values.
-                                 // let name_len_i = min_value_i + 2 + min_value_size + 6;
-                                 //
-                                 // // todo: Name section here is DRY with request.
-                                 // let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
-                                 //
-                                 // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
-                                 //
-                                 // let mut name = [0; MAX_GET_SET_NAME_LEN];
-                                 //
-                                 // let mut i = name_start_i; // bits.
-                                 //
-                                 // i += VALUE_STRING_LEN_SIZE;
-                                 //
-                                 // if name_len as usize > name.len() {
-                                 //     return Err(CanError::PayloadData);
-                                 // }
-                                 //
-                                 // for char_i in 0..name_len {
-                                 //     name[char_i] = bits[i..i + 8].load_le::<u8>();
-                                 //     i += 8;
-                                 // }
-                                 //
-                                 // Ok(Self {
-                                 //     value,
-                                 //     default_value,
-                                 //     max_value,
-                                 //     min_value,
-                                 //     name,
-                                 //     name_len,
-                                 // })
+        unimplemented!() // todo: You just need to work thorugh it like with related.
+                         //
+                         // let val_tag_start_i = 5;
+                         // let (value, current_i) = Value::from_bits(bits, val_tag_start_i, &mut [])?; // todo: t str buf
+                         //
+                         //
+                         // // todo: Max, min and default values
+                         // let default_value = Value::Empty;
+                         //
+                         // let max_value_i = default_value_i + VALUE_TAG_BIT_LEN + 6; // Includes pad.
+                         //
+                         // let max_value = NumericValue::Empty;
+                         // let max_value_size = 0; // todo
+                         //
+                         // let min_value = NumericValue::Empty;
+                         // let min_value_size = 0; // todo
+                         // // 2 is tag size of numeric value.
+                         // let min_value_i = max_value_i + 2 + max_value_size + 6;
+                         //
+                         // // todo: Update once you include default values.
+                         // let name_len_i = min_value_i + 2 + min_value_size + 6;
+                         //
+                         // // todo: Name section here is DRY with request.
+                         // let name_start_i = name_len_i + NAME_LEN_BIT_SIZE;
+                         //
+                         // let name_len = bits[name_len_i..name_start_i].load_le::<u8>() as usize;
+                         //
+                         // let mut name = [0; MAX_GET_SET_NAME_LEN];
+                         //
+                         // let mut i = name_start_i; // bits.
+                         //
+                         // i += VALUE_STRING_LEN_SIZE;
+                         //
+                         // if name_len as usize > name.len() {
+                         //     return Err(CanError::PayloadData);
+                         // }
+                         //
+                         // for char_i in 0..name_len {
+                         //     name[char_i] = bits[i..i + 8].load_le::<u8>();
+                         //     i += 8;
+                         // }
+                         //
+                         // Ok(Self {
+                         //     value,
+                         //     default_value,
+                         //     max_value,
+                         //     min_value,
+                         //     name,
+                         //     name_len,
+                         // })
     }
 }
 
@@ -536,7 +533,7 @@ impl IdAllocationData {
             // Must include the 5-bit unique_id len field in FD mode.
             let bits = result.view_bits_mut::<Msb0>();
 
-            let mut i_bit = 1 * 8;
+            let mut i_bit = 8;
             bits[i_bit..i_bit + 5].store_le(16_u8);
 
             i_bit += 5;

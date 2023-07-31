@@ -1,7 +1,7 @@
 //! This module includes code related to the FIX2 Dronecan standard.
 
 use crate::{f16, messages::MsgType};
-use packed_struct::{prelude::*, PackedStruct};
+use packed_struct::prelude::*;
 
 #[derive(Clone, Copy, PrimitiveEnum_u8)]
 #[repr(u8)]
