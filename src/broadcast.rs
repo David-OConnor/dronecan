@@ -956,13 +956,11 @@ pub fn publish_ardupilot_gnss_status(
     )
 }
 
-/// https://github.com/dronecan/DSDL/blob/master/sensors/rc/20400.RCInput.uavcan
+/// https://github.com/dronecan/DSDL/blob/master/dronecan/sensors/rc/1140.RCInput.uavcan
 pub fn publish_rc_input(
     can: &mut Can_,
-    // 1: valid. 2: failsafe.
-    status: u16,
-    // `quality` is scaled between 0 (no signal) and 255 (full signal)
-    quality: u8,
+    status: u16,   // 1: valid. 2: failsafe.
+    quality: u8,   // `quality` is scaled between 0 (no signal) and 255 (full signal)
     id: u8,        // u4
     rc_in: &[u16], // Includes control and aux channels. Each is 12-bits
     num_channels: u8,
@@ -973,37 +971,45 @@ pub fn publish_rc_input(
 
     const CHAN_SIZE_BITS: usize = 12;
 
+    let quality = 255; // todo temp
+
     let m_type = MsgType::RcInput;
 
     buf[0..2].copy_from_slice(&status.to_le_bytes());
     buf[2] = quality;
-    buf[3] = id & 0b1111;
+    buf[3] = (id & 0b1111) << 4;
 
     let bits = buf.view_bits_mut::<Msb0>();
 
     let mut i_bits = 28; // (u16 + u8 + u4 status, quality, id)
 
     // 12 bits per channel.
-    let rcin_len = crate::bit_size_to_byte_size(num_channels as usize * CHAN_SIZE_BITS);
-    // println!("RCIN len: {:?}", rcin_len);
+    let mut rcin_len = crate::bit_size_to_byte_size(num_channels as usize * CHAN_SIZE_BITS);
 
     // For FD, add the length field of 6 bits.
     if fd_mode {
         bits[i_bits..6].store_le(rcin_len as u8);
         i_bits += 6;
+        rcin_len += 1; // Perhaps not, depending?
     }
 
     for ch in rc_in {
-        bits[i_bits..i_bits + CHAN_SIZE_BITS].store_le(*ch);
+        bits[i_bits..i_bits + CHAN_SIZE_BITS].store_be(*ch);
+
+        // Bit level alignment mess sorted out by examining DC messages
+        let nibble_0 = ch & 0xf;
+        let nibble_1 = (ch >> 4) & 0xf;
+        let nibble_2 = (ch >> 8) & 0xf;
+
+        let re_arranged = (nibble_1 << 8) | (nibble_0 << 4) | &nibble_2;
+        bits[i_bits..i_bits + CHAN_SIZE_BITS].store_be(re_arranged);
+
         i_bits += CHAN_SIZE_BITS;
     }
 
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
 
     let payload_len = m_type.payload_size() as usize + rcin_len;
-
-    // println!("Payload len: {}", payload_len);
-    // println!("Buf: {:?}", buf);
 
     broadcast(
         can,

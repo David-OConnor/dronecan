@@ -131,7 +131,7 @@ impl MsgType {
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
-            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 2,
+            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4,
             Self::PositFusedAnyleaf => 36,
         }
     }
