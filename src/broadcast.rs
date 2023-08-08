@@ -193,9 +193,6 @@ fn can_send(
         }
     }
 
-    // Not sure if this helps or is required etc.
-    // atomic::compiler_fence(Ordering::SeqCst);
-
     match can.transmit_preserve(frame_header, frame_data, &mut message_pending_handler) {
         Ok(_) => Ok(()),
         Err(_e) => Err(CanError::Hardware),
@@ -994,14 +991,12 @@ pub fn publish_rc_input(
     }
 
     for ch in rc_in {
-        bits[i_bits..i_bits + CHAN_SIZE_BITS].store_be(*ch);
-
         // Bit level alignment mess sorted out by examining DC messages
         let nibble_0 = ch & 0xf;
         let nibble_1 = (ch >> 4) & 0xf;
         let nibble_2 = (ch >> 8) & 0xf;
 
-        let re_arranged = (nibble_1 << 8) | (nibble_0 << 4) | &nibble_2;
+        let re_arranged = (nibble_1 << 8) | (nibble_0 << 4) | nibble_2;
         bits[i_bits..i_bits + CHAN_SIZE_BITS].store_be(re_arranged);
 
         i_bits += CHAN_SIZE_BITS;
