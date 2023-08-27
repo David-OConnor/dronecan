@@ -18,8 +18,11 @@ use core::num::{NonZeroU16, NonZeroU8};
 #[derive(Clone, Copy)]
 pub enum CanClock {
     Mhz160,
+    Mhz170,
     Mhz120,
 }
+
+use defmt::println;
 
 fn set_dronecan_filter(
     can: &mut FdCan<Can, ConfigMode>,
@@ -63,6 +66,11 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
 
     // todo: Hard-coded for 160, for now at least.
     let (prescaler_nom, seg1_nom, seg2_nom) = match can_clock {
+        CanClock::Mhz170 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_170_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_170_mhz(),
+            _ => CanBitrate::B1m.timings_170_mhz(),
+        },
         CanClock::Mhz160 => match bitrate {
             CanBitrate::B250k => CanBitrate::B250k.timings_160_mhz(),
             CanBitrate::B500k => CanBitrate::B500k.timings_160_mhz(),
@@ -75,7 +83,14 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
         },
     };
 
-    let (prescaler_data, seg1_data, seg2_data) = bitrate.timings_160_mhz();
+    let (prescaler_data, seg1_data, seg2_data) = match can_clock {
+        CanClock::Mhz170 => bitrate.timings_170_mhz(),
+        CanClock::Mhz160 => bitrate.timings_160_mhz(),
+        CanClock::Mhz120 => bitrate.timings_120_mhz(),
+    };
+
+    println!("Nom: {} {} {}", prescaler_nom, seg1_nom, seg2_nom);
+    println!("Data: {} {} {}", prescaler_data, seg1_data, seg2_data);
 
     let nominal_bit_timing = can_config::NominalBitTiming {
         prescaler: NonZeroU16::new(prescaler_nom).unwrap(),
@@ -122,7 +137,6 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
         dest_node_id: 0, // 7 bits
         req_or_resp: RequestResponse::Request,
     };
-
 
     set_dronecan_filter(
         &mut can,

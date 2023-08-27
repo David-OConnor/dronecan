@@ -142,7 +142,6 @@ fn can_send(
         len: frame_data_len,
         frame_format,
         id,
-        // bit_rate_switching: false,
         bit_rate_switching: true,
         marker: None,
     };
@@ -357,8 +356,6 @@ pub fn broadcast(
         can,
         can_id.value(),
         &payload[..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
-        // &payload,
-        // payload_len as u8,
         // The frame data length here includes the tail byte
         tail_byte_i as u8 + 1,
         fd_mode,
