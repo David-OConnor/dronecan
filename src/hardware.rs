@@ -105,10 +105,24 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     // Node: H7 has up to 64 filters available. This is set up for G4's limitations.
     // This `GetNodeInfo` also matches dynamic ID allocation.
 
+    can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
+
+    can.enable_interrupt(Interrupt::RxFifo0NewMsg);
+
+    // This appears to be backwards in the hardware; Need line 1 on G4 for FIFO 0.
+    can.enable_interrupt_line(InterruptLine::_1, true);
+
+    can.into_normal()
+}
+
+pub fn setup_protocol_filters(can: Can_) -> Can_ {
+    let mut can = can.into_config_mode();
+
     let s = ServiceData {
         dest_node_id: 0, // 7 bits
         req_or_resp: RequestResponse::Request,
     };
+
 
     set_dronecan_filter(
         &mut can,
@@ -149,24 +163,17 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     );
     // todo: Temp realloc location; we need a message we can regularly recieve to initiate
     // todo the process. (until our id filter works??)
-    set_dronecan_filter(
-        &mut can,
-        ExtendedFilterSlot::_3,
-        FrameType::Message,
-        MsgType::NodeStatus.id(),
-    );
+    // set_dronecan_filter(
+    //     &mut can,
+    //     ExtendedFilterSlot::_3,
+    //     FrameType::Message,
+    //     MsgType::NodeStatus.id(),
+    // );
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
     let reject_filter = ExtendedFilter::reject_all();
     can.set_extended_filter(ExtendedFilterSlot::_7, reject_filter);
-
-    can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
-
-    can.enable_interrupt(Interrupt::RxFifo0NewMsg);
-
-    // This appears to be backwards in the hardware; Need line 1 on G4 for FIFO 0.
-    can.enable_interrupt_line(InterruptLine::_1, true);
 
     can.into_normal()
 }

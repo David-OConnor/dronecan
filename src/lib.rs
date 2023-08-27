@@ -31,6 +31,9 @@ pub use protocol::*;
 #[cfg(feature = "hal")]
 pub use broadcast::*;
 
+#[cfg(feature = "hal")]
+pub use hardware::setup_protocol_filters;
+
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
