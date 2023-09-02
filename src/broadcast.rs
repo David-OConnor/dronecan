@@ -964,8 +964,6 @@ pub fn publish_rc_input(
 
     const CHAN_SIZE_BITS: usize = 12;
 
-    let quality = 255; // todo temp
-
     let m_type = MsgType::RcInput;
 
     buf[0..2].copy_from_slice(&status.to_le_bytes());
