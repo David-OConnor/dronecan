@@ -272,7 +272,6 @@ fn send_multiple_frames(
         let tail_byte_i = find_tail_byte_index(payload_len_this_frame as u8);
         bufs[active_frame][tail_byte_i] = tail_byte.value();
 
-        // todo: You may need to cut the active fram eoff early for the last frame.
         can_send(
             can,
             can_id,
@@ -355,7 +354,7 @@ pub fn broadcast(
     can_send(
         can,
         can_id.value(),
-        &payload[..tail_byte_i + 1], // todo: Ideal to not pass whole thing, but TS demons
+        &payload[..tail_byte_i + 1],
         // The frame data length here includes the tail byte
         tail_byte_i as u8 + 1,
         fd_mode,

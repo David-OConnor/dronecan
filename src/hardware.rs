@@ -20,6 +20,7 @@ pub enum CanClock {
     Mhz160,
     Mhz170,
     Mhz120,
+    Mhz100,
 }
 
 use defmt::println;
@@ -81,16 +82,19 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
             CanBitrate::B500k => CanBitrate::B500k.timings_120_mhz(),
             _ => CanBitrate::B1m.timings_120_mhz(),
         },
+        CanClock::Mhz100 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_100_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_100_mhz(),
+            _ => CanBitrate::B1m.timings_100_mhz(),
+        },
     };
 
     let (prescaler_data, seg1_data, seg2_data) = match can_clock {
         CanClock::Mhz170 => bitrate.timings_170_mhz(),
         CanClock::Mhz160 => bitrate.timings_160_mhz(),
         CanClock::Mhz120 => bitrate.timings_120_mhz(),
+        CanClock::Mhz100 => bitrate.timings_100_mhz(),
     };
-
-    println!("Nom: {} {} {}", prescaler_nom, seg1_nom, seg2_nom);
-    println!("Data: {} {} {}", prescaler_data, seg1_data, seg2_data);
 
     let nominal_bit_timing = can_config::NominalBitTiming {
         prescaler: NonZeroU16::new(prescaler_nom).unwrap(),

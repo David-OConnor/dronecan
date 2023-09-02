@@ -121,6 +121,20 @@ impl CanBitrate {
             Self::B8m => (1, 12, 2),
         }
     }
+
+    // todo: QC these for 2M+!
+    pub fn timings_100_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (40, 8, 1),
+            Self::B500k => (20, 8, 1),
+            Self::B1m => (10, 8, 1),
+            Self::B2m => (5, 8, 1),
+            // todo: These will likely work, but you need to calculate them.
+            Self::B4m => unimplemented!(),
+            Self::B5m => unimplemented!(),
+            Self::B8m => unimplemented!(),
+        }
+    }
 }
 
 /// 16-bit floating point
