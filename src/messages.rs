@@ -39,6 +39,7 @@ pub enum MsgType {
     ConfigRxGet,
     ConfigRx,
     PositFusedAnyleaf,
+    ActuatorArrayCommand,
 }
 
 impl MsgType {
@@ -73,6 +74,7 @@ impl MsgType {
             Self::ConfigRxGet => 3_112,
             Self::ConfigRx => 3_113,
             Self::PositFusedAnyleaf => 3_115,
+            Self::ActuatorArrayCommand => 1_010,
             // todo: Anyleaf config sizes?
         }
     }
@@ -89,6 +91,7 @@ impl MsgType {
             Self::Fix2 => MsgPriority::Nominal,
             Self::LinkStats => MsgPriority::Low,
             Self::PositFusedAnyleaf => MsgPriority::Nominal,
+            Self::ActuatorArrayCommand => MsgPriority::High,
             _ => MsgPriority::Slow,
         }
     }
@@ -132,6 +135,7 @@ impl MsgType {
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4,
             Self::PositFusedAnyleaf => 36,
+            Self::ActuatorArrayCommand => 0, // Size is determined by the number of commands.
         }
     }
 
@@ -176,6 +180,7 @@ impl MsgType {
             Self::ConfigRxGet => 0,
             Self::ConfigRx => 0,
             Self::PositFusedAnyleaf => 0,
+            Self::ActuatorArrayCommand => 24_119,
         }
     }
 }

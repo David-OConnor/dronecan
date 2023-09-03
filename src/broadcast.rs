@@ -63,6 +63,7 @@ pub static TRANSFER_ID_GNSS_AUX: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_FIX2: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_GLOBAL_NAVIGATION_SOLUTION: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_RC_INPUT: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_ACTUATOR_ARRAY_COMMAND: AtomicUsize = AtomicUsize::new(0);
 
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
@@ -99,6 +100,11 @@ static mut BUF_TEMPERATURE: [u8; 8] = [0; 8];
 static mut BUF_GNSS_AUX: [u8; 20] = [0; 20]; // 16 bytes, but needs a tail byte, so 20.
 static mut BUF_FIX2: [u8; 64] = [0; 64]; // 48-byte payload; pad to 64.
 static mut BUF_GLOBAL_NAVIGATION_SOLUTION: [u8; 90] = [0; 90];
+
+const ACTUATOR_COMMAND_SIZE: usize = 4;
+// Hard-coded to no more than 4 commands, for now.
+static mut BUF_ACTUATOR_ARRAY_COMMAND: [u8; ACTUATOR_COMMAND_SIZE * 4] =
+    [0; ACTUATOR_COMMAND_SIZE * 4];
 
 // This buffer accomodates up to 16 12-bit channels. (224 bits or 28 bytes)
 static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
@@ -346,8 +352,6 @@ pub fn broadcast(
     if tail_byte_i >= payload.len() {
         return Err(CanError::PayloadSize);
     }
-
-    payload[tail_byte_i] = tail_byte.value();
 
     payload[tail_byte_i] = tail_byte.value();
 
@@ -1205,4 +1209,63 @@ pub fn get_frame_info(
         },
         Err(_) => Err(CanError::Hardware),
     }
+}
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum ActuatorCommandType {
+    Unitless = 0,
+    Position = 1,
+    Force = 2,
+    Speed = 3,
+    Pwm = 4,
+}
+
+pub struct ActuatorCommand {
+    id: u8,
+    type_: ActuatorCommandType,
+    value: f32,
+}
+
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/actuator/Command.uavcan
+/// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/actuator/1010.ArrayCommand.uavcan
+pub fn publish_actuator_commands(
+    can: &mut Can_,
+    commands: &[ActuatorCommand],
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    if commands.len() > 4 {
+        println!("Exceeded present limit of 4 actuator commands");
+        return Err(CanError::PayloadData);
+    }
+
+    let buf = unsafe { &mut BUF_ACTUATOR_ARRAY_COMMAND };
+
+    let m_type = MsgType::ActuatorArrayCommand;
+
+    let mut i = 0;
+    for command in commands {
+        buf[i] = command.id;
+        buf[i + 1] = command.type_ as u8;
+
+        let f16_bytes = f16::from_f32(command.value).to_le_bytes();
+        buf[i + 3] = f16_bytes[0]; // todo: QC the order.
+        buf[i + 4] = f16_bytes[1];
+
+        i += ACTUATOR_COMMAND_SIZE
+    }
+
+    let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        Some(ACTUATOR_COMMAND_SIZE * commands.len()),
+    )
 }
