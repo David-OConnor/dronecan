@@ -147,6 +147,26 @@ pub struct f16 {
     bits: u16,
 }
 
+/// from `half`'s impl: https://github.com/starkat99/half-rs/blob/main/src/leading_zeros.rs
+#[inline]
+const fn leading_zeros_u16(mut x: u16) -> u32 {
+    use crunchy::unroll;
+    let mut c = 0;
+    let msb = 1 << 15;
+    unroll! { for i in 0 .. 16 {
+        if x & msb == 0 {
+            c += 1;
+        } else {
+            return c;
+        }
+        #[allow(unused_assignments)]
+        if i < 15 {
+            x <<= 1;
+        }
+    }}
+    c
+}
+
 impl f16 {
     pub const fn from_f32(value: f32) -> Self {
         // half's implementation
@@ -220,14 +240,62 @@ impl f16 {
 
         Self { bits }
     }
-    //
-    // pub fn to_f32(self) -> f32 {
-    //     // todo
-    // }
-    //
-    // pub fn from_le_bytes(bytes: [u8; 2]) -> Self {
-    //     // todo
-    // }
+
+    pub fn to_f32(self) -> f32 {
+        // half's implementation
+        // https://github.com/starkat99/half-rs/blob/main/src/binary16/arch.rs
+
+        let i = self.bits;
+
+        // Check for signed zero
+        // TODO: Replace mem::transmute with from_bits() once from_bits is const-stabilized
+        if i & 0x7FFFu16 == 0 {
+            return unsafe { mem::transmute((i as u32) << 16) };
+        }
+
+        let half_sign = (i & 0x8000u16) as u32;
+        let half_exp = (i & 0x7C00u16) as u32;
+        let half_man = (i & 0x03FFu16) as u32;
+
+        // Check for an infinity or NaN when all exponent bits set
+        if half_exp == 0x7C00u32 {
+            // Check for signed infinity if mantissa is zero
+            if half_man == 0 {
+                return unsafe { mem::transmute((half_sign << 16) | 0x7F80_0000u32) };
+            } else {
+                // NaN, keep current mantissa but also set most significiant mantissa bit
+                return unsafe {
+                    mem::transmute((half_sign << 16) | 0x7FC0_0000u32 | (half_man << 13))
+                };
+            }
+        }
+
+        // Calculate single-precision components with adjusted exponent
+        let sign = half_sign << 16;
+        // Unbias exponent
+        let unbiased_exp = ((half_exp as i32) >> 10) - 15;
+
+        // Check for subnormals, which will be normalized by adjusting exponent
+        if half_exp == 0 {
+            // Calculate how much to adjust the exponent by
+            let e = leading_zeros_u16(half_man as u16) - 6;
+
+            // Rebias and adjust exponent
+            let exp = (127 - 15 - e) << 23;
+            let man = (half_man << (14 + e)) & 0x7F_FF_FFu32;
+            return unsafe { mem::transmute(sign | exp | man) };
+        }
+
+        // Rebias exponent for a normalized normal
+        let exp = ((unbiased_exp + 127) as u32) << 23;
+        let man = (half_man & 0x03FFu32) << 13;
+
+        unsafe { mem::transmute(sign | exp | man) }
+    }
+
+    pub fn from_le_bytes(bytes: [u8; 2]) -> Self {
+        Self { bits: u16::from_le_bytes(bytes) }
+    }
 
     pub fn to_le_bytes(&self) -> [u8; 2] {
         self.bits.to_le_bytes()

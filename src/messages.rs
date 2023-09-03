@@ -167,8 +167,9 @@ impl MsgType {
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
             // Self::RcInput => 42_648,
-            Self::RcInput => 9_053,
-            Self::LinkStats => 0,
+            // Self::RcInput => 9_053,
+            Self::RcInput => 45_481,
+            Self::LinkStats => 12_600, // placeholder
             Self::ArdupilotGnssStatus => 47_609,
             Self::SetConfig => 0,
             Self::ConfigGnssGet => 0,

@@ -979,23 +979,24 @@ pub fn publish_rc_input(
 
     // For FD, add the length field of 6 bits.
     if fd_mode {
-        bits[i_bits..6].store_le(rcin_len as u8);
+        bits[i_bits..i_bits + 6].store_le(rcin_len as u8);
         i_bits += 6;
         rcin_len += 1; // Perhaps not, depending?
     }
 
     for ch in rc_in {
         // Bit level alignment mess sorted out by examining DC messages
-        let nibble_0 = ch & 0xf;
-        let nibble_1 = (ch >> 4) & 0xf;
-        let nibble_2 = (ch >> 8) & 0xf;
+        let nibble_right = ch & 0xf;
+        let nibble_middle = (ch >> 4) & 0xf;
+        let nibble_left = (ch >> 8) & 0xf;
 
-        let re_arranged = (nibble_1 << 8) | (nibble_0 << 4) | nibble_2;
+        let re_arranged = (nibble_middle << 8) | (nibble_right << 4) | nibble_left;
         bits[i_bits..i_bits + CHAN_SIZE_BITS].store_be(re_arranged);
 
         i_bits += CHAN_SIZE_BITS;
     }
 
+    println!("RC IN LEN: {} num_ch: {}", rcin_len, num_channels);
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
 
     let payload_len = m_type.payload_size() as usize + rcin_len;

@@ -26,6 +26,9 @@ packed_struct = {version = "^0.10.1", default_features = false }
 # This is mainly used for by the `GetSet` DSDL message.
 bitvec = { version = "1.0.1", default-features = false }
 
+# for f16 implementation, mimicking `half`'s.
+crunchy = "0.2.2"
+
 [features]
 hal = []
 hal_g431 = ["fdcan/fdcan_g0_g4_l5", "stm32-hal2/g431", "stm32-hal2/can_fd_g", "defmt", "hal"]
