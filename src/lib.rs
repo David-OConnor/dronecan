@@ -294,7 +294,9 @@ impl f16 {
     }
 
     pub fn from_le_bytes(bytes: [u8; 2]) -> Self {
-        Self { bits: u16::from_le_bytes(bytes) }
+        Self {
+            bits: u16::from_le_bytes(bytes),
+        }
     }
 
     pub fn to_le_bytes(&self) -> [u8; 2] {

@@ -981,7 +981,7 @@ pub fn publish_rc_input(
         i_bits += 6;
     }
 
-    let payload_len = crate::bit_size_to_byte_size( i_bits + num_channels as usize * CHAN_SIZE_BITS);
+    let payload_len = crate::bit_size_to_byte_size(i_bits + num_channels as usize * CHAN_SIZE_BITS);
 
     for ch in rc_in {
         // Bit level alignment mess sorted out by examining DC messages
