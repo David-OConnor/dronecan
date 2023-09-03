@@ -124,7 +124,6 @@ impl MsgType {
             Self::GlobalNavigationSolution => 88,
             // This is the rssi, status, and id items; add 12 bits for every channel
             Self::RcInput => 4,
-            // Self::ChData => 38,
             Self::LinkStats => 10,
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
             Self::SetConfig => 20,          // todo

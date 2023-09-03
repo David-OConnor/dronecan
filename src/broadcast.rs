@@ -974,15 +974,14 @@ pub fn publish_rc_input(
 
     let mut i_bits = 28; // (u16 + u8 + u4 status, quality, id)
 
-    // 12 bits per channel.
-    let mut rcin_len = crate::bit_size_to_byte_size(num_channels as usize * CHAN_SIZE_BITS);
-
     // For FD, add the length field of 6 bits.
     if fd_mode {
-        bits[i_bits..i_bits + 6].store_le(rcin_len as u8);
+        // Why BE?
+        bits[i_bits..i_bits + 6].store_be(num_channels);
         i_bits += 6;
-        rcin_len += 1; // Perhaps not, depending?
     }
+
+    let payload_len = crate::bit_size_to_byte_size( i_bits + num_channels as usize * CHAN_SIZE_BITS);
 
     for ch in rc_in {
         // Bit level alignment mess sorted out by examining DC messages
@@ -996,10 +995,7 @@ pub fn publish_rc_input(
         i_bits += CHAN_SIZE_BITS;
     }
 
-    println!("RC IN LEN: {} num_ch: {}", rcin_len, num_channels);
     let transfer_id = TRANSFER_ID_RC_INPUT.fetch_add(1, Ordering::Relaxed);
-
-    let payload_len = m_type.payload_size() as usize + rcin_len;
 
     broadcast(
         can,
