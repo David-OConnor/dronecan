@@ -117,7 +117,6 @@ pub const NODE_ID_MAX_VALUE: u8 = 127;
 
 use stm32_hal2::pac;
 
-// todo t
 /// Write out packet to the CAN peripheral.
 fn can_send(
     can: &mut Can_,
@@ -1222,9 +1221,34 @@ pub enum ActuatorCommandType {
 }
 
 pub struct ActuatorCommand {
-    id: u8,
-    type_: ActuatorCommandType,
-    value: f32,
+    pub actuator_id: u8,
+    pub type_: ActuatorCommandType,
+    pub value: f32,
+}
+
+impl ActuatorCommand {
+    pub fn from_buf(data: &[u8]) -> Self {
+        let actuator_id = data[0];
+        let type_ = match data[1] {
+            // todo: DRY with definitions above; use num_enum.
+            0 => ActuatorCommandType::Unitless,
+            1 => ActuatorCommandType::Position,
+            2 => ActuatorCommandType::Force,
+            3 => ActuatorCommandType::Speed,
+            4 => ActuatorCommandType::Pwm,
+            _ => ActuatorCommandType::Unitless, // fallthrough. Fail?
+        };
+
+        // todo: Handle different command types; currently assuming PWM.
+
+        let value = f16::from_le_bytes([data[2], data[3]]).to_f32(); // todo: QC order.
+
+        Self {
+            actuator_id,
+            type_,
+            value,
+        }
+    }
 }
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/actuator/Command.uavcan
@@ -1244,16 +1268,37 @@ pub fn publish_actuator_commands(
 
     let m_type = MsgType::ActuatorArrayCommand;
 
-    let mut i = 0;
-    for command in commands {
-        buf[i] = command.id;
-        buf[i + 1] = command.type_ as u8;
+    let mut payload_len = ACTUATOR_COMMAND_SIZE * commands.len();
 
-        let f16_bytes = f16::from_f32(command.value).to_le_bytes();
-        buf[i + 3] = f16_bytes[0]; // todo: QC the order.
-        buf[i + 4] = f16_bytes[1];
+    if fd_mode {
+        let bits = buf.view_bits_mut::<Msb0>();
 
-        i += ACTUATOR_COMMAND_SIZE
+        bits[0..4].store_le(commands.len());
+        let mut i_bit = 4;
+
+        for command in commands {
+            bits[i_bit..i_bit + 8].store_be(command.actuator_id);
+            bits[i_bit + 8..i_bit + 16].store_be(command.type_ as u8);
+
+            let f16_bytes = f16::from_f32(command.value).to_le_bytes();
+
+            bits[i_bit + 16..i_bit + 24].store_be(f16_bytes[0]);
+            bits[i_bit + 24..i_bit + 32].store_be(f16_bytes[1]);
+
+            i_bit += ACTUATOR_COMMAND_SIZE * 8;
+        }
+    } else {
+        let mut i = 0;
+        for command in commands {
+            buf[i] = command.actuator_id;
+            buf[i + 1] = command.type_ as u8;
+
+            let f16_bytes = f16::from_f32(command.value).to_le_bytes();
+            buf[i + 2] = f16_bytes[0];
+            buf[i + 3] = f16_bytes[1];
+
+            i += ACTUATOR_COMMAND_SIZE
+        }
     }
 
     let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
@@ -1266,6 +1311,6 @@ pub fn publish_actuator_commands(
         transfer_id as u8,
         buf,
         fd_mode,
-        Some(ACTUATOR_COMMAND_SIZE * commands.len()),
+        Some(payload_len),
     )
 }
