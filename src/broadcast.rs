@@ -1267,7 +1267,7 @@ pub fn publish_actuator_commands(
     let buf = unsafe { &mut BUF_ACTUATOR_ARRAY_COMMAND };
 
     // Without this zeroing, we seem to get a garbage nibble at the end.
-    *buf = [0; ACTUATOR_COMMAND_SIZE * 4];
+    // *buf = [0; ACTUATOR_COMMAND_SIZE * 4];
 
     let m_type = MsgType::ActuatorArrayCommand;
 
@@ -1289,6 +1289,9 @@ pub fn publish_actuator_commands(
             bits[i_bit + 24..i_bit + 32].store_be(f16_bytes[1]);
 
             i_bit += ACTUATOR_COMMAND_SIZE * 8;
+
+             // todo: This may not be strictly always true; could cause CRC failures.(?)
+            payload_len += 1;
         }
     } else {
         let mut i = 0;
