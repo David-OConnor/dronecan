@@ -1266,6 +1266,9 @@ pub fn publish_actuator_commands(
 
     let buf = unsafe { &mut BUF_ACTUATOR_ARRAY_COMMAND };
 
+    // Without this zeroing, we seem to get a garbage nibble at the end.
+    *buf = [0; ACTUATOR_COMMAND_SIZE * 4];
+
     let m_type = MsgType::ActuatorArrayCommand;
 
     let mut payload_len = ACTUATOR_COMMAND_SIZE * commands.len();
