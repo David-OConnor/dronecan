@@ -979,8 +979,7 @@ pub fn publish_rc_input(
 
     // For FD, add the length field of 6 bits.
     if fd_mode {
-        // Why BE?
-        bits[i_bits..i_bits + 6].store_be(num_channels);
+        bits[i_bits..i_bits + 6].store_be(num_channels); // Why BE?
         i_bits += 6;
     }
 
@@ -1290,7 +1289,7 @@ pub fn publish_actuator_commands(
 
             i_bit += ACTUATOR_COMMAND_SIZE * 8;
 
-             // todo: This may not be strictly always true; could cause CRC failures.(?)
+            // todo: This may not be strictly always true; could cause CRC failures.(?)
             payload_len += 1;
         }
     } else {

@@ -98,8 +98,6 @@ impl MsgType {
 
     /// Get the payload size. Does not include padding for a tail byte.
     pub const fn payload_size(&self) -> u8 {
-        // todo: 0 values are ones we haven't implemented yet.
-        // todo: Handle when response has a diff payload size!
         match self {
             Self::IdAllocation => 19, // Includes 16 bytes of unique id. (Needs a len field for FD mode)
             // This includes no name; add name len to it after. Assumes no hardware certificate of authority.
@@ -169,9 +167,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
-            // Self::RcInput => 42_648,
-            // Self::RcInput => 9_053,
-            Self::RcInput => 45_481,
+            Self::RcInput => 9_053,
             Self::LinkStats => 12_600, // placeholder
             Self::ArdupilotGnssStatus => 47_609,
             Self::SetConfig => 0,
