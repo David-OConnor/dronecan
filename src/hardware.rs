@@ -25,7 +25,7 @@ pub enum CanClock {
 
 use defmt::println;
 
-fn set_dronecan_filter(
+pub fn set_dronecan_filter(
     can: &mut FdCan<Can, ConfigMode>,
     slot: ExtendedFilterSlot,
     frame_type: FrameType,
@@ -179,14 +179,6 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
         FrameType::Service(s),
         MsgType::SetConfig.id(),
     );
-    // todo: Temp realloc location; we need a message we can regularly recieve to initiate
-    // todo the process. (until our id filter works??)
-    // set_dronecan_filter(
-    //     &mut can,
-    //     ExtendedFilterSlot::_3,
-    //     FrameType::Message,
-    //     MsgType::NodeStatus.id(),
-    // );
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.

@@ -67,6 +67,7 @@ pub static TRANSFER_ID_ACTUATOR_ARRAY_COMMAND: AtomicUsize = AtomicUsize::new(0)
 
 pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_TELEMETRY: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_ARDUPILOT_GNSS_STATUS: AtomicUsize = AtomicUsize::new(0);
 
 // todo: Impl these Arudpilot-specific types:
@@ -109,6 +110,7 @@ static mut BUF_ACTUATOR_ARRAY_COMMAND: [u8; ACTUATOR_COMMAND_SIZE * 4] =
 // This buffer accomodates up to 16 12-bit channels. (224 bits or 28 bytes)
 static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
 static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
+static mut BUF_TELEMETRY: [u8; 30] = [0; 30]; // todo: Size
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
@@ -1011,6 +1013,7 @@ pub fn publish_rc_input(
     )
 }
 
+/// AnyLeaf custom format, for now, but may be merged into the DSDL.
 pub fn publish_link_stats(
     can: &mut Can_,
     data: &LinkStats,
@@ -1024,6 +1027,33 @@ pub fn publish_link_stats(
     buf[0..m_type.payload_size() as usize].copy_from_slice(&data.to_bytes());
 
     let transfer_id = TRANSFER_ID_LINK_STATS.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
+/// Perhaps similar to [DSDL's tunneling messages](https://github.com/dronecan/DSDL/tree/master/uavcan/tunnel)
+pub fn publish_telemetry(
+    can: &mut Can_,
+    data: &[u8],
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_TELEMETRY };
+
+    let m_type = MsgType::Telemetry;
+
+    buf[0..m_type.payload_size() as usize].copy_from_slice(data);
+
+    let transfer_id = TRANSFER_ID_TELEMETRY.fetch_add(1, Ordering::Relaxed);
 
     broadcast(
         can,

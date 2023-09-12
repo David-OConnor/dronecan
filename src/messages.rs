@@ -28,6 +28,7 @@ pub enum MsgType {
     GnssAux,
     Fix2,
     GlobalNavigationSolution,
+    ActuatorArrayCommand,
     RcInput, // WIP
     // ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
@@ -39,7 +40,7 @@ pub enum MsgType {
     ConfigRxGet,
     ConfigRx,
     PositFusedAnyleaf,
-    ActuatorArrayCommand,
+    Telemetry,
 }
 
 impl MsgType {
@@ -64,6 +65,7 @@ impl MsgType {
             Self::GnssAux => 1_061,
             Self::Fix2 => 1_063,
             Self::GlobalNavigationSolution => 2_000,
+            Self::ActuatorArrayCommand => 1_010,
             Self::RcInput => 1_140,
             Self::LinkStats => 1_141, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
@@ -74,8 +76,7 @@ impl MsgType {
             Self::ConfigRxGet => 3_112,
             Self::ConfigRx => 3_113,
             Self::PositFusedAnyleaf => 3_115,
-            Self::ActuatorArrayCommand => 1_010,
-            // todo: Anyleaf config sizes?
+            Self::Telemetry => 3_120,
         }
     }
 
@@ -123,6 +124,7 @@ impl MsgType {
             Self::Fix2 => 62, // 50 without covariance, plus 12 with.
             // This assumes we are not using either dynamic-len fields `pose_covariance` or `velocity_covariance`.
             Self::GlobalNavigationSolution => 88,
+            Self::ActuatorArrayCommand => 0, // Size is determined by the number of commands.
             // This is the rssi, status, and id items; add 12 bits for every channel
             Self::RcInput => 4,
             Self::LinkStats => 10,
@@ -131,9 +133,10 @@ impl MsgType {
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
-            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 4,
+            Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
             Self::PositFusedAnyleaf => 36,
-            Self::ActuatorArrayCommand => 0, // Size is determined by the number of commands.
+            Self::Telemetry => 20, // todo Figure thi sout.
+
         }
     }
 
@@ -167,6 +170,7 @@ impl MsgType {
             Self::GnssAux => 9_390,
             Self::Fix2 => 51_096,
             Self::GlobalNavigationSolution => 7_536,
+            Self::ActuatorArrayCommand => 24_119,
             Self::RcInput => 9_053,
             Self::LinkStats => 12_600, // placeholder
             Self::ArdupilotGnssStatus => 47_609,
@@ -176,7 +180,7 @@ impl MsgType {
             Self::ConfigRxGet => 0,
             Self::ConfigRx => 0,
             Self::PositFusedAnyleaf => 0,
-            Self::ActuatorArrayCommand => 24_119,
+            Self::Telemetry => 0,
         }
     }
 }
