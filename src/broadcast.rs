@@ -110,7 +110,7 @@ static mut BUF_ACTUATOR_ARRAY_COMMAND: [u8; ACTUATOR_COMMAND_SIZE * 4] =
 // This buffer accomodates up to 16 12-bit channels. (224 bits or 28 bytes)
 static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
 static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
-static mut BUF_TELEMETRY: [u8; 30] = [0; 30]; // todo: Size
+static mut BUF_TELEMETRY: [u8; 64] = [0; 64];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
@@ -1044,6 +1044,7 @@ pub fn publish_link_stats(
 pub fn publish_telemetry(
     can: &mut Can_,
     data: &[u8],
+    payload_len: usize,
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
@@ -1051,7 +1052,7 @@ pub fn publish_telemetry(
 
     let m_type = MsgType::Telemetry;
 
-    buf[0..m_type.payload_size() as usize].copy_from_slice(data);
+    buf[0..payload_len].copy_from_slice(data);
 
     let transfer_id = TRANSFER_ID_TELEMETRY.fetch_add(1, Ordering::Relaxed);
 
@@ -1063,7 +1064,7 @@ pub fn publish_telemetry(
         transfer_id as u8,
         buf,
         fd_mode,
-        None,
+        Some(payload_len),
     )
 }
 

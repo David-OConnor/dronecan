@@ -135,7 +135,7 @@ impl MsgType {
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
             Self::PositFusedAnyleaf => 36,
-            Self::Telemetry => 20, // todo Figure thi sout.
+            Self::Telemetry => 60,
 
         }
     }
