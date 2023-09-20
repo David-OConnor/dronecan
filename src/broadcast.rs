@@ -92,8 +92,8 @@ static mut BUF_TRANSPORT_STATS: [u8; 20] = [0; 20];
 static mut BUF_GET_SET: [u8; 90] = [0; 90];
 
 static mut BUF_AHRS_SOLUTION: [u8; 48] = [0; 48]; // Note: No covariance.
-                                                  // static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
-                                                  // Potentially need size 12 for mag strength in FD mode, even with no cov.
+// static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 8] = [0; 8]; // Note: No covariance.
+// Potentially need size 12 for mag strength in FD mode, even with no cov.
 static mut BUF_MAGNETIC_FIELD_STRENGTH2: [u8; 12] = [0; 12]; // Note: No covariance.
 static mut BUF_RAW_IMU: [u8; 64] = [0; 64]; // Note: No covariance.
 static mut BUF_PRESSURE: [u8; 8] = [0; 8];
@@ -1052,7 +1052,7 @@ pub fn publish_telemetry(
 
     let m_type = MsgType::Telemetry;
 
-    buf[0..payload_len].copy_from_slice(data);
+    buf[..payload_len].copy_from_slice(&data[..payload_len]);
 
     let transfer_id = TRANSFER_ID_TELEMETRY.fetch_add(1, Ordering::Relaxed);
 
