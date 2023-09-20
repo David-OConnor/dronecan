@@ -8,7 +8,6 @@ edition = "2021"
 
 [dependencies]
 fdcan = { version = "^0.2.0", optional = true }
-0
 stm32-hal2 = { path = "../../stm32-hal", optional = true }
 
 # To parse enums from their integer repr
