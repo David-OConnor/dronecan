@@ -7,6 +7,8 @@ use crate::{MsgPriority, PAYLOAD_SIZE_CONFIG_COMMON, PAYLOAD_SIZE_NODE_STATUS};
 #[cfg(feature = "hal")]
 use defmt::println;
 
+pub struct ParseError {}
+
 // #[repr(u16)]
 #[derive(Clone, Copy, PartialEq)]
 pub enum MsgType {
@@ -50,7 +52,7 @@ impl MsgType {
             Self::IdAllocation => 1,
             Self::GetNodeInfo => 1,
             Self::GlobalTimeSync => 4,
-            Self::TransportStats => 4, // todo: Duplicate id?
+            Self::TransportStats => 4,
             Self::Panic => 5,
             Self::Restart => 5,
             Self::ExecuteOpcode => 10,
@@ -78,6 +80,40 @@ impl MsgType {
             Self::PositFusedAnyleaf => 3_115,
             Self::Telemetry => 3_120,
         }
+    }
+
+    /// Inverse of `id`, nothing that when there is a shared ID, choose one variant arbitrarily.
+    pub const fn from_id(id: u16) -> Result<Self, ParseError> {
+        Ok(match id {
+            1 => Self::IdAllocation,
+            4 => Self::GlobalTimeSync,
+            5 => Self::Panic,
+            10 => Self::ExecuteOpcode,
+            11 => Self::GetSet,
+            341 => Self::NodeStatus,
+            1_000 => Self::AhrsSolution,
+            1_002 => Self::MagneticFieldStrength2,
+            1_003 => Self::RawImu,
+            1_027 => Self::RawAirData,
+            1_028 => Self::StaticPressure,
+            1_029 => Self::StaticTemperature,
+            1_061 => Self::GnssAux,
+            1_063 => Self::Fix2,
+            2_000 => Self::GlobalNavigationSolution,
+            1_010 => Self::ActuatorArrayCommand,
+            1_140 => Self::RcInput,
+            1_141 => Self::LinkStats, // AnyLeaf custom for now.
+            20_003 => Self::ArdupilotGnssStatus,
+            3_105 => Self::SetConfig, // Anyleaf custom for now.
+            // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
+            3_110 => Self::ConfigGnssGet,
+            3_111 => Self::ConfigGnss,
+            3_112 => Self::ConfigRxGet,
+            3_113 => Self::ConfigRx,
+            3_115 => Self::PositFusedAnyleaf,
+            3_120 => Self::Telemetry,
+            _ => return Err(ParseError {}),
+        })
     }
 
     pub fn priority(&self) -> MsgPriority {
@@ -136,7 +172,6 @@ impl MsgType {
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
             Self::PositFusedAnyleaf => 36,
             Self::Telemetry => 60,
-
         }
     }
 
