@@ -35,7 +35,7 @@ pub enum MsgType {
     // ChData,    // AnyLeaf custom for now
     LinkStats, // AnyLeaf custom for now.
     ArdupilotGnssStatus,
-    SetConfig, // Anyleaf custom for now.
+    // SetConfig, // Anyleaf custom for now.
     // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
     ConfigGnssGet,
     ConfigGnss,
@@ -43,6 +43,7 @@ pub enum MsgType {
     ConfigRx,
     PositFusedAnyleaf,
     Telemetry,
+    PowerStats,
 }
 
 impl MsgType {
@@ -71,7 +72,7 @@ impl MsgType {
             Self::RcInput => 1_140,
             Self::LinkStats => 1_141, // AnyLeaf custom for now.
             Self::ArdupilotGnssStatus => 20_003,
-            Self::SetConfig => 3_105, // Anyleaf custom for now.
+            // Self::SetConfig => 3_105, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
             Self::ConfigGnssGet => 3_110,
             Self::ConfigGnss => 3_111,
@@ -79,6 +80,7 @@ impl MsgType {
             Self::ConfigRx => 3_113,
             Self::PositFusedAnyleaf => 3_115,
             Self::Telemetry => 3_120,
+            Self::PowerStats => 3_124,
         }
     }
 
@@ -104,7 +106,7 @@ impl MsgType {
             1_140 => Self::RcInput,
             1_141 => Self::LinkStats, // AnyLeaf custom for now.
             20_003 => Self::ArdupilotGnssStatus,
-            3_105 => Self::SetConfig, // Anyleaf custom for now.
+            // 3_105 => Self::SetConfig, // Anyleaf custom for now.
             // Custom types here we use on multiple projects, but aren't (yet?) part of the DC spec.
             3_110 => Self::ConfigGnssGet,
             3_111 => Self::ConfigGnss,
@@ -112,6 +114,7 @@ impl MsgType {
             3_113 => Self::ConfigRx,
             3_115 => Self::PositFusedAnyleaf,
             3_120 => Self::Telemetry,
+            3_124 => Self::PowerStats,
             _ => return Err(ParseError {}),
         })
     }
@@ -165,13 +168,14 @@ impl MsgType {
             Self::RcInput => 4,
             Self::LinkStats => 10,
             Self::ArdupilotGnssStatus => 7, // Should be 8 from DSDL, but 7 seems to work.
-            Self::SetConfig => 20,          // todo
+            // Self::SetConfig => 20,          // todo
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
             Self::PositFusedAnyleaf => 36,
             Self::Telemetry => 60,
+            Self::PowerStats => 51,
         }
     }
 
@@ -209,13 +213,14 @@ impl MsgType {
             Self::RcInput => 9_053,
             Self::LinkStats => 12_600, // placeholder
             Self::ArdupilotGnssStatus => 47_609,
-            Self::SetConfig => 0,
+            // Self::SetConfig => 0,
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => 0,
             Self::ConfigRxGet => 0,
             Self::ConfigRx => 0,
             Self::PositFusedAnyleaf => 0,
             Self::Telemetry => 0,
+            Self::PowerStats => 0,
         }
     }
 }

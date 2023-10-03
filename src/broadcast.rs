@@ -69,6 +69,7 @@ pub static TRANSFER_ID_CH_DATA: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_TELEMETRY: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_ARDUPILOT_GNSS_STATUS: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_POWER_STATS: AtomicUsize = AtomicUsize::new(0);
 
 // todo: Impl these Arudpilot-specific types:
 // https://github.com/dronecan/DSDL/tree/master/ardupilot/gnss
@@ -112,6 +113,7 @@ static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
 static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
 static mut BUF_TELEMETRY: [u8; 64] = [0; 64];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
+static mut BUF_POWER_STATS: [u8; 64] = [0; 64]; // todo: Size
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 1;
@@ -1296,9 +1298,6 @@ pub fn publish_actuator_commands(
 
     let buf = unsafe { &mut BUF_ACTUATOR_ARRAY_COMMAND };
 
-    // Without this zeroing, we seem to get a garbage nibble at the end.
-    // *buf = [0; ACTUATOR_COMMAND_SIZE * 4];
-
     let m_type = MsgType::ActuatorArrayCommand;
 
     let mut payload_len = ACTUATOR_COMMAND_SIZE * commands.len();
@@ -1348,5 +1347,67 @@ pub fn publish_actuator_commands(
         buf,
         fd_mode,
         Some(payload_len),
+    )
+}
+
+/// These units are volts, amps etc.
+#[derive(Default)]
+pub struct PowerStatsAnyleaf {
+    pub voltage_total: f32,
+    pub voltage_cell1: f32,
+    pub voltage_cell2: f32,
+    pub voltage_cell3: f32,
+    pub voltage_cell4: f32,
+    pub voltage_cell5: f32,
+    pub voltage_cell6: f32,
+    pub voltage_cell7: f32,
+    pub voltage_cell8: f32,
+    pub current_batt: f32,
+    pub current_5v: f32,
+    pub current_7v: f32,
+    pub estimated_portion_through: u8, // fraction of 255
+    pub estimated_time_remaining: u16, // seconds
+}
+
+impl PowerStatsAnyleaf {
+    pub fn to_bytes(&self) -> [u8; MsgType::PowerStats.payload_size()] {
+        let mut result = [0; MsgType::PowerStats.payload_size()];
+
+        result
+    }
+
+    pub fn from_bytes(buf: &[u8]) -> Self {
+        Self::default(); // todo temp
+        // Self {
+        //
+        // }
+    }
+}
+
+/// AnyLeaf custom power message
+pub fn publish_power_stats(
+    can: &mut Can_,
+    data: &PowerStatsAnyleaf,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+
+    let buf = unsafe { &mut BUF_POWER_STATS };
+
+    let m_type = MsgType::PowerStats;
+
+    buf[..MsgType::PowerStats.payload_size()].clone_from_slice(data.to_bytes());
+
+    let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
     )
 }
