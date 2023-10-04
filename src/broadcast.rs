@@ -1353,31 +1353,18 @@ pub fn publish_actuator_commands(
 /// These units are volts, amps etc.
 #[derive(Default)]
 pub struct PowerStatsAnyleaf {
-    pub voltage_total: f32,
-    pub voltage_cell1: f32,
-    pub voltage_cell2: f32,
-    pub voltage_cell3: f32,
-    pub voltage_cell4: f32,
-    pub voltage_cell5: f32,
-    pub voltage_cell6: f32,
-    pub voltage_cell7: f32,
-    pub voltage_cell8: f32,
-    pub current_batt: f32,
-    pub current_5v: f32,
-    pub current_7v: f32,
-    pub estimated_portion_through: u8, // fraction of 255
-    pub estimated_time_remaining: u16, // seconds
+
 }
 
 impl PowerStatsAnyleaf {
-    pub fn to_bytes(&self) -> [u8; MsgType::PowerStats.payload_size()] {
-        let mut result = [0; MsgType::PowerStats.payload_size()];
+    pub fn to_bytes(&self) -> [u8; MsgType::PowerStats.payload_size() as usize] {
+        let mut result = [0; MsgType::PowerStats.payload_size() as usize];
 
         result
     }
 
     pub fn from_bytes(buf: &[u8]) -> Self {
-        Self::default(); // todo temp
+        Self::default() // todo temp
         // Self {
         //
         // }
@@ -1396,7 +1383,7 @@ pub fn publish_power_stats(
 
     let m_type = MsgType::PowerStats;
 
-    buf[..MsgType::PowerStats.payload_size()].clone_from_slice(data.to_bytes());
+    buf[..MsgType::PowerStats.payload_size() as usize].clone_from_slice(&data.to_bytes());
 
     let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
 

@@ -173,12 +173,12 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
         FrameType::Service(s),
         MsgType::ConfigRxGet.id(),
     );
-    set_dronecan_filter(
-        &mut can,
-        ExtendedFilterSlot::_6,
-        FrameType::Service(s),
-        MsgType::SetConfig.id(),
-    );
+    // set_dronecan_filter(
+    //     &mut can,
+    //     ExtendedFilterSlot::_6,
+    //     FrameType::Service(s),
+    //     MsgType::SetConfig.id(),
+    // );
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
