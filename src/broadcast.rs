@@ -113,7 +113,7 @@ static mut BUF_RC_INPUT: [u8; 32] = [0; 32];
 static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
 static mut BUF_TELEMETRY: [u8; 64] = [0; 64];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
-static mut BUF_POWER_STATS: [u8; 64] = [0; 64]; // todo: Size
+static mut BUF_POWER_STATS: [u8; 48] = [0; 48];
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 1;
@@ -1350,15 +1350,79 @@ pub fn publish_actuator_commands(
     )
 }
 
+#[repr(u8)]
+#[derive(Clone, Copy)]
+pub enum BatteryInUse {
+    Main = 0,
+    Backup = 1,
+    None = 2,  // Perhaps only shows when powered by USB or CAN
+}
+
+
 /// These units are volts, amps etc.
+/// We serialize voltages and currents as u16 mV and mA.
 #[derive(Default)]
 pub struct PowerStatsAnyleaf {
-
+    pub voltage_batt: f32,
+    pub voltage_batt_backup: f32,
+    pub voltage_5v: f32,
+    pub voltage_7v: f32,
+    //
+    pub voltage_cell1: f32,
+    pub voltage_cell2: f32,
+    pub voltage_cell3: f32,
+    pub voltage_cell4: f32,
+    pub voltage_cell5: f32,
+    pub voltage_cell6: f32,
+    pub voltage_cell7: f32, // Currently unused
+    pub voltage_cell8: f32, // Currently unused
+    //
+    pub current_batt: f32,
+    pub current_batt_backup: f32, // Currently unused
+    pub current_5v: f32,
+    pub current_7v: f32,
+    //
+    pub estimated_portion_through: f32, // Fraction of 1. Serialized as a u8, fraction of 255
+    pub estimated_time_remaining: f32, // In seconds, serialized as u16 (seconds).
+    pub battery_in_use: BatteryInUse
 }
 
 impl PowerStatsAnyleaf {
+    /// Utility function for serializing a float to a 1000-scaled u16.
+    fn add_data_u16(buf: &mut [u8], val: f32, i: &mut usize) {
+        buf[i..*i + 2].copy_from_slice(&((val * 1_000.) as u16).to_le_bytes());
+        *i += 1;
+    }
+
     pub fn to_bytes(&self) -> [u8; MsgType::PowerStats.payload_size() as usize] {
         let mut result = [0; MsgType::PowerStats.payload_size() as usize];
+        let mut i = 0;
+
+        self.add_data_u16(&mut result, self.voltage_batt, &mut i);
+        self.add_data_u16(&mut result, self.voltage_batt_backup, &mut i);
+        self.add_data_u16(&mut result, self.voltage_5v, &mut i);
+        self.add_data_u16(&mut result, self.voltage_7v, &mut i);
+
+        self.add_data_u16(&mut result, self.voltage_cell1, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell2, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell3, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell4, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell5, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell6, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell7, &mut i);
+        self.add_data_u16(&mut result, self.voltage_cell8, &mut i);
+
+        self.add_data_u16(&mut result, self.current_batt, &mut i);
+        self.add_data_u16(&mut result, self.current_batt_backup, &mut i);
+        self.add_data_u16(&mut result, self.current_5v, &mut i);
+        self.add_data_u16(&mut result, self.current_7v, &mut i);
+
+        result[i] = (self.estimated_portion_through * 255.) as u8;
+        i += 1;
+
+        result[i..i+2].copy_from_slice(&(self.estimated_time_remaining as u16).to_le_bytes());
+        i += 2;
+        result[i] = self.battery_in_use as u8;
 
         result
     }
