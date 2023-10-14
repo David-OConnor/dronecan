@@ -1358,6 +1358,12 @@ pub enum BatteryInUse {
     None = 2,  // Perhaps only shows when powered by USB or CAN
 }
 
+impl Default for BatteryInUse {
+    fn default() -> Self {
+        Self::None
+    }
+}
+
 
 /// These units are volts, amps etc.
 /// We serialize voltages and currents as u16 mV and mA.
@@ -1390,7 +1396,7 @@ pub struct PowerStatsAnyleaf {
 impl PowerStatsAnyleaf {
     /// Utility function for serializing a float to a 1000-scaled u16.
     fn add_data_u16(buf: &mut [u8], val: f32, i: &mut usize) {
-        buf[i..*i + 2].copy_from_slice(&((val * 1_000.) as u16).to_le_bytes());
+        buf[*i..*i + 2].copy_from_slice(&((val * 1_000.) as u16).to_le_bytes());
         *i += 1;
     }
 
@@ -1398,24 +1404,24 @@ impl PowerStatsAnyleaf {
         let mut result = [0; MsgType::PowerStats.payload_size() as usize];
         let mut i = 0;
 
-        self.add_data_u16(&mut result, self.voltage_batt, &mut i);
-        self.add_data_u16(&mut result, self.voltage_batt_backup, &mut i);
-        self.add_data_u16(&mut result, self.voltage_5v, &mut i);
-        self.add_data_u16(&mut result, self.voltage_7v, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_batt, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_batt_backup, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_5v, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_7v, &mut i);
 
-        self.add_data_u16(&mut result, self.voltage_cell1, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell2, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell3, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell4, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell5, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell6, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell7, &mut i);
-        self.add_data_u16(&mut result, self.voltage_cell8, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell1, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell2, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell3, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell4, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell5, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell6, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell7, &mut i);
+        Self::add_data_u16(&mut result, self.voltage_cell8, &mut i);
 
-        self.add_data_u16(&mut result, self.current_batt, &mut i);
-        self.add_data_u16(&mut result, self.current_batt_backup, &mut i);
-        self.add_data_u16(&mut result, self.current_5v, &mut i);
-        self.add_data_u16(&mut result, self.current_7v, &mut i);
+        Self::add_data_u16(&mut result, self.current_batt, &mut i);
+        Self::add_data_u16(&mut result, self.current_batt_backup, &mut i);
+        Self::add_data_u16(&mut result, self.current_5v, &mut i);
+        Self::add_data_u16(&mut result, self.current_7v, &mut i);
 
         result[i] = (self.estimated_portion_through * 255.) as u8;
         i += 1;
