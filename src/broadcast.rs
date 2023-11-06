@@ -32,6 +32,7 @@ use crate::{
 use packed_struct::PackedStruct;
 
 use core::convert::Infallible;
+use num_enum::TryFromPrimitive;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
@@ -1351,11 +1352,11 @@ pub fn publish_actuator_commands(
 }
 
 #[repr(u8)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, PartialEq, TryFromPrimitive)]
 pub enum BatteryInUse {
     Main = 0,
     Backup = 1,
-    None = 2,  // Perhaps only shows when powered by USB or CAN
+    None = 2, // Perhaps only shows when powered by USB or CAN
 }
 
 impl Default for BatteryInUse {
@@ -1364,10 +1365,9 @@ impl Default for BatteryInUse {
     }
 }
 
-
 /// These units are volts, amps etc.
 /// We serialize voltages and currents as u16 mV and mA.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct PowerStatsAnyleaf {
     pub voltage_batt: f32,
     pub voltage_batt_backup: f32,
@@ -1389,8 +1389,12 @@ pub struct PowerStatsAnyleaf {
     pub current_7v: f32,
     //
     pub estimated_portion_through: f32, // Fraction of 1. Serialized as a u8, fraction of 255
-    pub estimated_time_remaining: f32, // In seconds, serialized as u16 (seconds).
-    pub battery_in_use: BatteryInUse
+    pub estimated_time_remaining: f32,  // In seconds, serialized as u16 (seconds).
+    pub battery_in_use: BatteryInUse,
+}
+
+fn u16_helper(val: &[u8; 2]) -> f32 {
+    u16::from_le_bytes(val.try_into().unwrap()) as f32 / 1_000.
 }
 
 impl PowerStatsAnyleaf {
@@ -1426,7 +1430,7 @@ impl PowerStatsAnyleaf {
         result[i] = (self.estimated_portion_through * 255.) as u8;
         i += 1;
 
-        result[i..i+2].copy_from_slice(&(self.estimated_time_remaining as u16).to_le_bytes());
+        result[i..i + 2].copy_from_slice(&(self.estimated_time_remaining as u16).to_le_bytes());
         i += 2;
         result[i] = self.battery_in_use as u8;
 
@@ -1434,10 +1438,32 @@ impl PowerStatsAnyleaf {
     }
 
     pub fn from_bytes(buf: &[u8]) -> Self {
-        Self::default() // todo temp
-        // Self {
-        //
-        // }
+        /// As in `to_bytes`, we assume the data is in u16 x 1000.
+        Self {
+            // todo: Helper to
+            voltage_batt: u16_helper(&buf[0..2]),
+            voltage_batt_backup: u16_helper(&buf[2..4]),
+            voltage_5v: u16_helper(&buf[4..6]),
+            voltage_7v: u16_helper(&buf[6..8]),
+            //
+            voltage_cell1: u16_helper(&buf[8..10]),
+            voltage_cell2: u16_helper(&buf[10..12]),
+            voltage_cell3: u16_helper(&buf[12..14]),
+            voltage_cell4: u16_helper(&buf[14..16]),
+            voltage_cell5: u16_helper(&buf[16..18]),
+            voltage_cell6: u16_helper(&buf[18..20]),
+            voltage_cell7: u16_helper(&buf[20..22]),
+            voltage_cell8: u16_helper(&buf[22..24]),
+            //
+            current_batt: u16_helper(&buf[24..26]),
+            current_batt_backup: u16_helper(&buf[26..28]),
+            current_5v: u16_helper(&buf[28..30]),
+            current_7v: u16_helper(&buf[30..32]),
+
+            estimated_portion_through: &buf[32] as f32 / 255.,
+            estimated_time_remaining: u16_helper(&buf[33..35]),
+            battery_in_use: BatteryInUse::try_from(buf[35]).unwrap(),
+        }
     }
 }
 
@@ -1448,7 +1474,6 @@ pub fn publish_power_stats(
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
-
     let buf = unsafe { &mut BUF_POWER_STATS };
 
     let m_type = MsgType::PowerStats;

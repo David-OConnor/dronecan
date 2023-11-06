@@ -46,7 +46,6 @@ pub enum MsgType {
     PositFusedAnyleaf,
     Telemetry,
     PowerStats,
-
 }
 
 impl MsgType {
