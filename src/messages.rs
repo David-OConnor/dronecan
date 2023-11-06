@@ -41,9 +41,12 @@ pub enum MsgType {
     ConfigGnss,
     ConfigRxGet,
     ConfigRx,
+    ConfigPowerGet,
+    ConfigPower,
     PositFusedAnyleaf,
     Telemetry,
     PowerStats,
+
 }
 
 impl MsgType {
@@ -78,6 +81,8 @@ impl MsgType {
             Self::ConfigGnss => 3_111,
             Self::ConfigRxGet => 3_112,
             Self::ConfigRx => 3_113,
+            Self::ConfigPowerGet => 3_117,
+            Self::ConfigPower => 3_118,
             Self::PositFusedAnyleaf => 3_115,
             Self::Telemetry => 3_120,
             Self::PowerStats => 3_124,
@@ -112,6 +117,8 @@ impl MsgType {
             3_111 => Self::ConfigGnss,
             3_112 => Self::ConfigRxGet,
             3_113 => Self::ConfigRx,
+            3_117 => Self::ConfigPowerGet,
+            3_118 => Self::ConfigPower,
             3_115 => Self::PositFusedAnyleaf,
             3_120 => Self::Telemetry,
             3_124 => Self::PowerStats,
@@ -173,6 +180,8 @@ impl MsgType {
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
+            Self::ConfigPowerGet => 0,
+            Self::ConfigPower => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 0,
             Self::PositFusedAnyleaf => 36,
             Self::Telemetry => 60,
             Self::PowerStats => 36,
@@ -217,6 +226,8 @@ impl MsgType {
             Self::ConfigGnssGet => 0,
             Self::ConfigGnss => 0,
             Self::ConfigRxGet => 0,
+            Self::ConfigPower => 0,
+            Self::ConfigPowerGet => 0,
             Self::ConfigRx => 0,
             Self::PositFusedAnyleaf => 0,
             Self::Telemetry => 0,

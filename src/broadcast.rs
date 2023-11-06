@@ -1457,6 +1457,8 @@ pub fn publish_power_stats(
 
     let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
 
+    // println!("CAN BUF: {:?}", buf);
+
     broadcast(
         can,
         FrameType::Message,
