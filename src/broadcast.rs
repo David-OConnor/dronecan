@@ -1368,7 +1368,7 @@ impl Default for BatteryInUse {
 /// These units are volts, amps etc.
 /// We serialize voltages and currents as u16 mV and mA.
 #[derive(Default, Clone)]
-pub struct PowerStatsAnyleaf {
+pub struct PowerStats {
     pub voltage_batt: f32,
     pub voltage_batt_backup: f32,
     pub voltage_5v: f32,
@@ -1393,11 +1393,11 @@ pub struct PowerStatsAnyleaf {
     pub battery_in_use: BatteryInUse,
 }
 
-fn u16_helper(val: &[u8; 2]) -> f32 {
+fn u16_helper(val: &[u8]) -> f32 {
     u16::from_le_bytes(val.try_into().unwrap()) as f32 / 1_000.
 }
 
-impl PowerStatsAnyleaf {
+impl PowerStats {
     /// Utility function for serializing a float to a 1000-scaled u16.
     fn add_data_u16(buf: &mut [u8], val: f32, i: &mut usize) {
         buf[*i..*i + 2].copy_from_slice(&((val * 1_000.) as u16).to_le_bytes());
@@ -1460,7 +1460,7 @@ impl PowerStatsAnyleaf {
             current_5v: u16_helper(&buf[28..30]),
             current_7v: u16_helper(&buf[30..32]),
 
-            estimated_portion_through: &buf[32] as f32 / 255.,
+            estimated_portion_through: buf[32] as f32 / 255.,
             estimated_time_remaining: u16_helper(&buf[33..35]),
             battery_in_use: BatteryInUse::try_from(buf[35]).unwrap(),
         }
@@ -1470,7 +1470,7 @@ impl PowerStatsAnyleaf {
 /// AnyLeaf custom power message
 pub fn publish_power_stats(
     can: &mut Can_,
-    data: &PowerStatsAnyleaf,
+    data: &PowerStats,
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
