@@ -46,6 +46,7 @@ pub enum MsgType {
     PositFusedAnyleaf,
     Telemetry,
     PowerStats,
+    CircuitStatus,
 }
 
 impl MsgType {
@@ -85,6 +86,7 @@ impl MsgType {
             Self::PositFusedAnyleaf => 3_115,
             Self::Telemetry => 3_120,
             Self::PowerStats => 3_124,
+            Self::CircuitStatus => 1_091,
         }
     }
 
@@ -121,6 +123,7 @@ impl MsgType {
             3_115 => Self::PositFusedAnyleaf,
             3_120 => Self::Telemetry,
             3_124 => Self::PowerStats,
+            1_091 => Self::CircuitStatus,
             _ => return Err(ParseError {}),
         })
     }
@@ -184,6 +187,7 @@ impl MsgType {
             Self::PositFusedAnyleaf => 36,
             Self::Telemetry => 60,
             Self::PowerStats => 36,
+            Self::CircuitStatus => 7,
         }
     }
 
@@ -231,6 +235,7 @@ impl MsgType {
             Self::PositFusedAnyleaf => 0,
             Self::Telemetry => 0,
             Self::PowerStats => 0,
+            Self::CircuitStatus => 11_447,
         }
     }
 }

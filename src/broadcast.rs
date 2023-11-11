@@ -13,7 +13,7 @@ use stm32_hal2::can::Can;
 
 use bitvec::prelude::*;
 
-use defmt::println;
+use defmt::{error, println};
 
 use crate::{
     crc::TransferCrc,
@@ -71,6 +71,8 @@ pub static TRANSFER_ID_LINK_STATS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_TELEMETRY: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_ARDUPILOT_GNSS_STATUS: AtomicUsize = AtomicUsize::new(0);
 pub static TRANSFER_ID_POWER_STATS: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_CIRCUIT_STATUS: AtomicUsize = AtomicUsize::new(0);
+pub static TRANSFER_ID_POWER_SUPPLY_STATUS: AtomicUsize = AtomicUsize::new(0);
 
 // todo: Impl these Arudpilot-specific types:
 // https://github.com/dronecan/DSDL/tree/master/ardupilot/gnss
@@ -115,6 +117,8 @@ static mut BUF_LINK_STATS: [u8; 12] = [0; 12];
 static mut BUF_TELEMETRY: [u8; 64] = [0; 64];
 static mut BUF_ARDUPILOT_GNSS_STATUS: [u8; 8] = [0; 8];
 static mut BUF_POWER_STATS: [u8; 48] = [0; 48];
+static mut BUF_CIRCUIT_STATUS: [u8; 8] = [0; 8];
+static mut BUF_POWER_SUPPLY_STATUS: [u8; 8] = [0; 8];
 
 // Per DC spec.
 pub const NODE_ID_MIN_VALUE: u8 = 1;
@@ -1401,7 +1405,7 @@ impl PowerStats {
     /// Utility function for serializing a float to a 1000-scaled u16.
     fn add_data_u16(buf: &mut [u8], val: f32, i: &mut usize) {
         buf[*i..*i + 2].copy_from_slice(&((val * 1_000.) as u16).to_le_bytes());
-        *i += 1;
+        *i += 2;
     }
 
     pub fn to_bytes(&self) -> [u8; MsgType::PowerStats.payload_size() as usize] {
@@ -1480,7 +1484,7 @@ pub fn publish_power_stats(
 
     buf[..MsgType::PowerStats.payload_size() as usize].clone_from_slice(&data.to_bytes());
 
-    let transfer_id = TRANSFER_ID_ACTUATOR_ARRAY_COMMAND.fetch_add(1, Ordering::Relaxed);
+    let transfer_id = TRANSFER_ID_POWER_STATS.fetch_add(1, Ordering::Relaxed);
 
     // println!("CAN BUF: {:?}", buf);
 
@@ -1495,3 +1499,88 @@ pub fn publish_power_stats(
         None,
     )
 }
+
+#[derive(Clone, Copy)]
+#[repr(u8)]
+pub enum CircuitStatusErrorFlag {
+    Overvoltage = 1,
+    Undervoltage = 2,
+    Overcurrent = 4,
+    UnderCurrent = 8,
+}
+
+/// [DSDL 1091](https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/power/1091.CircuitStatus.uavcan)
+pub fn publish_circuit_status(
+    can: &mut Can_,
+    circuit_id: u16,
+    voltage: f32,
+    current: f32,
+    // error_flags: &[CircuitStatusErrorFlag],
+    error_flags: u8,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_CIRCUIT_STATUS };
+
+    let m_type = MsgType::PowerStats;
+
+    buf[0..2].clone_from_slice(&circuit_id.to_le_bytes());
+    buf[0..4].clone_from_slice(&f16::from_f32(voltage).to_le_bytes());
+    buf[4..6].clone_from_slice(&f16::from_f32(current).to_le_bytes());
+
+    // Flags handled in firmware for now due to not having dynamic arrays.
+    buf[6] = error_flags;
+    // buf[6] = 0;
+    // for flag in error_flags {
+    //     buf[6] |= *flag as u8;
+    // }
+
+    let transfer_id = TRANSFER_ID_CIRCUIT_STATUS.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
+/// [DSDL 1090](https://github.com/dronecan/DSDL/blob/master/uavcan/equipment/power/1090.PrimaryPowerSupplyStatus.uavcan)
+pub fn publish_power_supply_status(
+    can: &mut Can_,
+    hours_to_empty: f32,
+    hours_to_empty_variance: f32,
+    external_power_avail: bool,
+    remaining_energy_pct: u8,
+    remaining_energy_ct_std: u8,
+    fd_mode: bool,
+    node_id: u8,
+) -> Result<(), CanError> {
+    let buf = unsafe { &mut BUF_POWER_SUPPLY_STATUS };
+
+    let m_type = MsgType::PowerStats;
+
+    buf[0..2].clone_from_slice(&f16::from_f32(hours_to_empty).to_le_bytes());
+    buf[2..4].clone_from_slice(&f16::from_f32(hours_to_empty_variance).to_le_bytes());
+
+    buf[4] = (external_power_avail as u8) << 7 | (remaining_energy_pct & 0b111_1111);
+    // Note: Skipping remaining energy pct std for now.
+
+    let transfer_id = TRANSFER_ID_POWER_SUPPLY_STATUS.fetch_add(1, Ordering::Relaxed);
+
+    broadcast(
+        can,
+        FrameType::Message,
+        m_type,
+        node_id,
+        transfer_id as u8,
+        buf,
+        fd_mode,
+        None,
+    )
+}
+
