@@ -1525,7 +1525,7 @@ pub fn publish_circuit_status(
     let m_type = MsgType::PowerStats;
 
     buf[0..2].clone_from_slice(&circuit_id.to_le_bytes());
-    buf[0..4].clone_from_slice(&f16::from_f32(voltage).to_le_bytes());
+    buf[2..4].clone_from_slice(&f16::from_f32(voltage).to_le_bytes());
     buf[4..6].clone_from_slice(&f16::from_f32(current).to_le_bytes());
 
     // Flags handled in firmware for now due to not having dynamic arrays.
@@ -1583,4 +1583,3 @@ pub fn publish_power_supply_status(
         None,
     )
 }
-
