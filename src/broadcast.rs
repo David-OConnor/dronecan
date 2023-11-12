@@ -1562,7 +1562,7 @@ pub fn publish_power_supply_status(
 ) -> Result<(), CanError> {
     let buf = unsafe { &mut BUF_POWER_SUPPLY_STATUS };
 
-    let m_type = MsgType::PowerStats;
+    let m_type = MsgType::PowerSupplyStatus;
 
     buf[0..2].clone_from_slice(&f16::from_f32(hours_to_empty).to_le_bytes());
     buf[2..4].clone_from_slice(&f16::from_f32(hours_to_empty_variance).to_le_bytes());
