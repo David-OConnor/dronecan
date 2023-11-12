@@ -47,6 +47,7 @@ pub enum MsgType {
     Telemetry,
     PowerStats,
     CircuitStatus,
+    PowerSupplyStatus,
 }
 
 impl MsgType {
@@ -87,6 +88,7 @@ impl MsgType {
             Self::Telemetry => 3_120,
             Self::PowerStats => 3_124,
             Self::CircuitStatus => 1_091,
+            Self::PowerSupplyStatus => 1_090,
         }
     }
 
@@ -124,6 +126,7 @@ impl MsgType {
             3_120 => Self::Telemetry,
             3_124 => Self::PowerStats,
             1_091 => Self::CircuitStatus,
+            1_090 => Self::PowerSupplyStatus,
             _ => return Err(ParseError {}),
         })
     }
@@ -188,6 +191,7 @@ impl MsgType {
             Self::Telemetry => 60,
             Self::PowerStats => 36,
             Self::CircuitStatus => 7,
+            Self::PowerSupplyStatus => 6,
         }
     }
 
@@ -196,7 +200,7 @@ impl MsgType {
         crate::find_tail_byte_index(self.payload_size()) + 1
     }
 
-    /// .base_crc in Pydronecan
+    // .base_crc in Pydronecan
     // def get_info(a, b):
     //     val = dronecan.DATATYPES[(a, b)]
     //     print(val)
@@ -236,6 +240,7 @@ impl MsgType {
             Self::Telemetry => 0,
             Self::PowerStats => 0,
             Self::CircuitStatus => 11_447,
+            Self::PowerSupplyStatus => 22_815,
         }
     }
 }
