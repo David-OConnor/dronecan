@@ -1,4 +1,7 @@
-use core::{convert::TryInto, sync::atomic::AtomicUsize, sync::atomic::Ordering};
+use core::{
+    convert::TryInto,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
 #[cfg(feature = "hal")]
 use stm32_hal2::rng;

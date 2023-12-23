@@ -24,15 +24,13 @@ pub mod hardware;
 pub mod messages;
 pub mod protocol;
 
-pub use dsdl::*;
-pub use messages::*;
-pub use protocol::*;
-
 #[cfg(feature = "hal")]
 pub use broadcast::*;
-
+pub use dsdl::*;
 #[cfg(feature = "hal")]
 pub use hardware::setup_protocol_filters;
+pub use messages::*;
+pub use protocol::*;
 
 pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 

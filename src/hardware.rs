@@ -1,13 +1,12 @@
 //! This module contains hardware setup code, shared between firmwares. Requires the `hal` feature.
 
-use stm32_hal2::{can::Can, pac::FDCAN1};
-
 use fdcan::{
     config as can_config,
     filter::{Action, ExtendedFilter, ExtendedFilterSlot, FilterType},
     interrupt::{Interrupt, InterruptLine},
     ConfigMode, FdCan, NormalOperationMode,
 };
+use stm32_hal2::{can::Can, pac::FDCAN1};
 
 use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
 

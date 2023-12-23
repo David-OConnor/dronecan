@@ -2,10 +2,10 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
-use crate::{MsgPriority, PAYLOAD_SIZE_CONFIG_COMMON, PAYLOAD_SIZE_NODE_STATUS};
-
 #[cfg(feature = "hal")]
 use defmt::println;
+
+use crate::{MsgPriority, PAYLOAD_SIZE_CONFIG_COMMON, PAYLOAD_SIZE_NODE_STATUS};
 
 pub struct ParseError {}
 
@@ -93,6 +93,7 @@ impl MsgType {
             Self::PowerStats => 3_124,
             Self::CircuitStatus => 1_091,
             Self::PowerSupplyStatus => 1_090,
+            // Self::LinkStatsAnyleaf => 1_100,
         }
     }
 
@@ -126,9 +127,9 @@ impl MsgType {
             3_113 => Self::ConfigRx,
             3_114 => Self::ConfigRadioGet,
             3_115 => Self::ConfigRadio,
-            3_117 => Self::ConfigPowerGet,
+            3_116 => Self::ConfigPowerGet,
             3_118 => Self::ConfigPower,
-            3_115 => Self::PositFusedAnyleaf,
+            3_119 => Self::PositFusedAnyleaf,
             3_120 => Self::Telemetry,
             3_124 => Self::PowerStats,
             1_091 => Self::CircuitStatus,
@@ -148,6 +149,7 @@ impl MsgType {
             Self::StaticPressure => MsgPriority::Nominal,
             Self::Fix2 => MsgPriority::Nominal,
             Self::LinkStats => MsgPriority::Low,
+            // Self::LinkStatsAnyLeaf => MsgPriority::Low,
             Self::PositFusedAnyleaf => MsgPriority::Nominal,
             Self::ActuatorArrayCommand => MsgPriority::High,
             _ => MsgPriority::Slow,
@@ -200,6 +202,7 @@ impl MsgType {
             Self::PowerStats => 36,
             Self::CircuitStatus => 7,
             Self::PowerSupplyStatus => 6,
+            // Self::LinkStatsAnyleaf => 3,
         }
     }
 

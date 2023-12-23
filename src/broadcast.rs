@@ -1,19 +1,21 @@
 //! This module contains code related to broadcasting messages over CAN.
 //! It is hard-coded to work with our HAL.
 
-use core::sync::atomic::{AtomicUsize, Ordering};
+use core::{
+    convert::Infallible,
+    sync::atomic::{AtomicUsize, Ordering},
+};
 
+use bitvec::prelude::*;
+use defmt::{error, println};
 use fdcan::{
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
     id::{ExtendedId, Id},
     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
-
+use num_enum::TryFromPrimitive;
+use packed_struct::PackedStruct;
 use stm32_hal2::can::Can;
-
-use bitvec::prelude::*;
-
-use defmt::{error, println};
 
 use crate::{
     crc::TransferCrc,
@@ -28,11 +30,6 @@ use crate::{
     protocol::{CanId, FrameType, RequestResponse, ServiceData, TransferComponent},
     CanError,
 };
-
-use packed_struct::PackedStruct;
-
-use core::convert::Infallible;
-use num_enum::TryFromPrimitive;
 
 type Can_ = FdCan<Can, NormalOperationMode>;
 
