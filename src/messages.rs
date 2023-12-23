@@ -41,6 +41,8 @@ pub enum MsgType {
     ConfigGnss,
     ConfigRxGet,
     ConfigRx,
+    ConfigRadioGet,
+    ConfigRadio,
     ConfigPowerGet,
     ConfigPower,
     PositFusedAnyleaf,
@@ -82,6 +84,8 @@ impl MsgType {
             Self::ConfigGnss => 3_111,
             Self::ConfigRxGet => 3_112,
             Self::ConfigRx => 3_113,
+            Self::ConfigRadioGet => 3_114,
+            Self::ConfigRadio => 3_115,
             Self::ConfigPowerGet => 3_117,
             Self::ConfigPower => 3_118,
             Self::PositFusedAnyleaf => 3_115,
@@ -120,6 +124,8 @@ impl MsgType {
             3_111 => Self::ConfigGnss,
             3_112 => Self::ConfigRxGet,
             3_113 => Self::ConfigRx,
+            3_114 => Self::ConfigRadioGet,
+            3_115 => Self::ConfigRadio,
             3_117 => Self::ConfigPowerGet,
             3_118 => Self::ConfigPower,
             3_115 => Self::PositFusedAnyleaf,
@@ -185,6 +191,8 @@ impl MsgType {
             Self::ConfigGnss => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 8 + 4 * 15, // 4*15 = size of cal data.
             Self::ConfigRxGet => 0,
             Self::ConfigRx => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 5,
+            Self::ConfigRadioGet => 0,
+            Self::ConfigRadio => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 0, // todo A/R
             Self::ConfigPowerGet => 0,
             Self::ConfigPower => PAYLOAD_SIZE_CONFIG_COMMON as u8 + 0,
             Self::PositFusedAnyleaf => 36,
@@ -229,18 +237,9 @@ impl MsgType {
             Self::RcInput => 9_053,
             Self::LinkStats => 12_600, // placeholder
             Self::ArdupilotGnssStatus => 47_609,
-            // Self::SetConfig => 0,
-            Self::ConfigGnssGet => 0,
-            Self::ConfigGnss => 0,
-            Self::ConfigRxGet => 0,
-            Self::ConfigPower => 0,
-            Self::ConfigPowerGet => 0,
-            Self::ConfigRx => 0,
-            Self::PositFusedAnyleaf => 0,
-            Self::Telemetry => 0,
-            Self::PowerStats => 0,
             Self::CircuitStatus => 11_447,
             Self::PowerSupplyStatus => 22_815,
+            _ => 0, // ie custom commands.
         }
     }
 }
