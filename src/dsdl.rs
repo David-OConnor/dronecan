@@ -656,7 +656,7 @@ pub struct LinkStats {
     pub uplink_link_quality: u8,
     /// Uplink - signal-to-noise ratio. SNR reported by the RX. Value varies mostly by radio chip
     /// and gets lower with distance (once the agc hits its limit)
-    pub uplink_snr: i8,
+    pub uplink_snr: u8,
     /// Active antenna for diversity RX (0 - 1)
     pub active_antenna: u8,
     pub rf_mode: u8,
@@ -668,7 +668,7 @@ pub struct LinkStats {
     /// (0 - 100)
     pub downlink_link_quality: u8,
     /// Downlink - signal-to-noise ratio. SNR reported by the TX for telemetry packets
-    pub downlink_snr: i8,
+    pub downlink_snr: u8,
 }
 
 impl LinkStats {
