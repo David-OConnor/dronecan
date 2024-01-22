@@ -7,7 +7,7 @@ use core::{
 };
 
 use bitvec::prelude::*;
-use defmt::{error, println};
+use defmt::println;
 use fdcan::{
     frame::{FrameFormat, RxFrameInfo, TxFrameHeader},
     id::{ExtendedId, Id},

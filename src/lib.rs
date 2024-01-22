@@ -79,8 +79,9 @@ impl Default for CanBitrate {
 }
 
 impl CanBitrate {
-    /// Get timings for devcies that have a 160Mhz CAN clock. Note that timings are available for
-    /// most of these using a 170Mhz clock as well.
+    /// Get timings for devcies that have a 160Mhz CAN clock. Note that not all timings are available
+    /// at all input clock speeds. Choosing a CAN input clock of 80 or 160Mhz is the most flexible,
+    /// of the speeds available here.
     /// Returns (prescaler, segment 1, segment 2)
     /// http://www.bittiming.can-wiki.info/
     pub fn timings_160_mhz(&self) -> (u16, u8, u8) {
@@ -107,7 +108,6 @@ impl CanBitrate {
         }
     }
 
-    // todo: QC these for 2M+!
     pub fn timings_120_mhz(&self) -> (u16, u8, u8) {
         match self {
             Self::B250k => (30, 13, 2),
@@ -120,17 +120,27 @@ impl CanBitrate {
         }
     }
 
-    // todo: QC these for 2M+!
     pub fn timings_100_mhz(&self) -> (u16, u8, u8) {
         match self {
             Self::B250k => (40, 8, 1),
             Self::B500k => (20, 8, 1),
             Self::B1m => (10, 8, 1),
             Self::B2m => (5, 8, 1),
-            // todo: These will likely work, but you need to calculate them.
             Self::B4m => unimplemented!(),
             Self::B5m => unimplemented!(),
             Self::B8m => unimplemented!(),
+        }
+    }
+
+    pub fn timings_80_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (20, 13, 2),
+            Self::B500k => (10, 13, 2),
+            Self::B1m => (5, 13, 2),
+            Self::B2m => (4, 8, 1),
+            Self::B4m => (2, 8, 1),
+            Self::B5m => (1, 13, 2),
+            Self::B8m => (1, 8, 1),
         }
     }
 }
