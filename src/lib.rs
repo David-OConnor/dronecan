@@ -108,15 +108,15 @@ impl CanBitrate {
         }
     }
 
-    pub fn timings_120_mhz(&self) -> (u16, u8, u8) {
+    pub fn timings_80_mhz(&self) -> (u16, u8, u8) {
         match self {
-            Self::B250k => (30, 13, 2),
-            Self::B500k => (15, 13, 2),
-            Self::B1m => (8, 12, 2),
-            Self::B2m => (4, 12, 2),
-            Self::B4m => (2, 12, 2),
-            Self::B5m => unimplemented!(),
-            Self::B8m => (1, 12, 2),
+            Self::B250k => (20, 13, 2),
+            Self::B500k => (10, 13, 2),
+            Self::B1m => (5, 13, 2),
+            Self::B2m => (4, 8, 1),
+            Self::B4m => (2, 8, 1),
+            Self::B5m => (1, 13, 2),
+            Self::B8m => (1, 8, 1),
         }
     }
 
@@ -132,15 +132,15 @@ impl CanBitrate {
         }
     }
 
-    pub fn timings_80_mhz(&self) -> (u16, u8, u8) {
+    pub fn timings_120_mhz(&self) -> (u16, u8, u8) {
         match self {
-            Self::B250k => (20, 13, 2),
-            Self::B500k => (10, 13, 2),
-            Self::B1m => (5, 13, 2),
-            Self::B2m => (4, 8, 1),
-            Self::B4m => (2, 8, 1),
-            Self::B5m => (1, 13, 2),
-            Self::B8m => (1, 8, 1),
+            Self::B250k => (30, 13, 2),
+            Self::B500k => (15, 13, 2),
+            Self::B1m => (8, 12, 2),
+            Self::B2m => (4, 12, 2),
+            Self::B4m => (2, 12, 2),
+            Self::B5m => unimplemented!(),
+            Self::B8m => (1, 12, 2),
         }
     }
 }
