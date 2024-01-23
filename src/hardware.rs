@@ -16,10 +16,11 @@ use core::num::{NonZeroU16, NonZeroU8};
 
 #[derive(Clone, Copy)]
 pub enum CanClock {
+    Mhz80,
+    Mhz100,
+    Mhz120,
     Mhz160,
     Mhz170,
-    Mhz120,
-    Mhz100,
 }
 
 use defmt::println;
@@ -64,35 +65,40 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     // Nominal (arbitration) bit rate is almost 1Mhz or less, for compatibility
     // with non-FD devices on the bus.
 
-    // todo: Hard-coded for 160, for now at least.
     let (prescaler_nom, seg1_nom, seg2_nom) = match can_clock {
-        CanClock::Mhz170 => match bitrate {
-            CanBitrate::B250k => CanBitrate::B250k.timings_170_mhz(),
-            CanBitrate::B500k => CanBitrate::B500k.timings_170_mhz(),
-            _ => CanBitrate::B1m.timings_170_mhz(),
-        },
-        CanClock::Mhz160 => match bitrate {
-            CanBitrate::B250k => CanBitrate::B250k.timings_160_mhz(),
-            CanBitrate::B500k => CanBitrate::B500k.timings_160_mhz(),
-            _ => CanBitrate::B1m.timings_160_mhz(),
-        },
-        CanClock::Mhz120 => match bitrate {
-            CanBitrate::B250k => CanBitrate::B250k.timings_120_mhz(),
-            CanBitrate::B500k => CanBitrate::B500k.timings_120_mhz(),
-            _ => CanBitrate::B1m.timings_120_mhz(),
+        CanClock::Mhz80 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_80_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_80_mhz(),
+            _ => CanBitrate::B1m.timings_80_mhz(),
         },
         CanClock::Mhz100 => match bitrate {
             CanBitrate::B250k => CanBitrate::B250k.timings_100_mhz(),
             CanBitrate::B500k => CanBitrate::B500k.timings_100_mhz(),
             _ => CanBitrate::B1m.timings_100_mhz(),
         },
+        CanClock::Mhz120 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_120_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_120_mhz(),
+            _ => CanBitrate::B1m.timings_120_mhz(),
+        },
+        CanClock::Mhz160 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_160_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_160_mhz(),
+            _ => CanBitrate::B1m.timings_160_mhz(),
+        },
+        CanClock::Mhz170 => match bitrate {
+            CanBitrate::B250k => CanBitrate::B250k.timings_170_mhz(),
+            CanBitrate::B500k => CanBitrate::B500k.timings_170_mhz(),
+            _ => CanBitrate::B1m.timings_170_mhz(),
+        },
     };
 
     let (prescaler_data, seg1_data, seg2_data) = match can_clock {
-        CanClock::Mhz170 => bitrate.timings_170_mhz(),
-        CanClock::Mhz160 => bitrate.timings_160_mhz(),
-        CanClock::Mhz120 => bitrate.timings_120_mhz(),
+        CanClock::Mhz80 => bitrate.timings_80_mhz(),
         CanClock::Mhz100 => bitrate.timings_100_mhz(),
+        CanClock::Mhz120 => bitrate.timings_120_mhz(),
+        CanClock::Mhz160 => bitrate.timings_160_mhz(),
+        CanClock::Mhz170 => bitrate.timings_170_mhz(),
     };
 
     let nominal_bit_timing = can_config::NominalBitTiming {

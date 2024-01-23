@@ -84,30 +84,6 @@ impl CanBitrate {
     /// of the speeds available here.
     /// Returns (prescaler, segment 1, segment 2)
     /// http://www.bittiming.can-wiki.info/
-    pub fn timings_160_mhz(&self) -> (u16, u8, u8) {
-        match self {
-            Self::B250k => (40, 13, 2),
-            Self::B500k => (20, 13, 2),
-            Self::B1m => (10, 13, 2),
-            Self::B2m => (5, 13, 2),
-            Self::B4m => (4, 8, 1),
-            Self::B5m => (2, 13, 2),
-            Self::B8m => (2, 8, 1),
-        }
-    }
-
-    pub fn timings_170_mhz(&self) -> (u16, u8, u8) {
-        match self {
-            Self::B250k => (40, 14, 2),
-            Self::B500k => (20, 14, 2),
-            Self::B1m => (10, 14, 2),
-            Self::B2m => (5, 14, 2),
-            Self::B4m => unimplemented!(),
-            Self::B5m => (2, 14, 2),
-            Self::B8m => unimplemented!(),
-        }
-    }
-
     pub fn timings_80_mhz(&self) -> (u16, u8, u8) {
         match self {
             Self::B250k => (20, 13, 2),
@@ -141,6 +117,30 @@ impl CanBitrate {
             Self::B4m => (2, 12, 2),
             Self::B5m => unimplemented!(),
             Self::B8m => (1, 12, 2),
+        }
+    }
+
+    pub fn timings_160_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (40, 13, 2),
+            Self::B500k => (20, 13, 2),
+            Self::B1m => (10, 13, 2),
+            Self::B2m => (5, 13, 2),
+            Self::B4m => (4, 8, 1),
+            Self::B5m => (2, 13, 2),
+            Self::B8m => (2, 8, 1),
+        }
+    }
+
+    pub fn timings_170_mhz(&self) -> (u16, u8, u8) {
+        match self {
+            Self::B250k => (40, 14, 2),
+            Self::B500k => (20, 14, 2),
+            Self::B1m => (10, 14, 2),
+            Self::B2m => (5, 14, 2),
+            Self::B4m => unimplemented!(),
+            Self::B5m => (2, 14, 2),
+            Self::B8m => unimplemented!(),
         }
     }
 }
