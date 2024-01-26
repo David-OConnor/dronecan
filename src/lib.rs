@@ -37,6 +37,8 @@ pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 // Unfortunately, it seems we can't satisfy static allocation using const *methods*.
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
 
+pub const NODE_STATUS_BROADCAST_PERIOD: f32 = 1.; // In s. Between 2 and 1000.
+
 // todo: Protocol enum instead?
 static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 

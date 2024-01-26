@@ -126,12 +126,11 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     can.set_nominal_bit_timing(nominal_bit_timing);
     can.set_data_bit_timing(data_bit_timing);
 
-
     can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
 
     can.enable_interrupt(Interrupt::RxFifo0NewMsg);
 
-    // This appears to be backwards in the hardware; Need line 1 on G4 for FIFO 0.
+    // Workaround for a bug in hardare and/or docs: Need line 1 on G4 for FIFO 0.
     #[cfg(feature = "hal_h7")]
     can.enable_interrupt_line(InterruptLine::_0, true);
     #[cfg(not(feature = "hal_h7"))]
