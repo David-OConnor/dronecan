@@ -62,7 +62,7 @@ pub fn set_dronecan_filter(
 
 pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> Can_ {
     let mut can = FdCan::new(Can::new(can_pac)).into_config_mode();
-    // Nominal (arbitration) bit rate is almost 1Mhz or less, for compatibility
+    // Nominal (arbitration) bit rate is always 1Mhz or less, for compatibility
     // with non-FD devices on the bus.
 
     let (prescaler_nom, seg1_nom, seg2_nom) = match can_clock {
@@ -126,14 +126,15 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
     can.set_nominal_bit_timing(nominal_bit_timing);
     can.set_data_bit_timing(data_bit_timing);
 
-    // Node: H7 has up to 64 filters available. This is set up for G4's limitations.
-    // This `GetNodeInfo` also matches dynamic ID allocation.
 
     can.set_frame_transmit(can_config::FrameTransmissionConfig::AllowFdCanAndBRS);
 
     can.enable_interrupt(Interrupt::RxFifo0NewMsg);
 
     // This appears to be backwards in the hardware; Need line 1 on G4 for FIFO 0.
+    #[cfg(feature = "hal_h7")]
+    can.enable_interrupt_line(InterruptLine::_0, true);
+    #[cfg(not(feature = "hal_h7"))]
     can.enable_interrupt_line(InterruptLine::_1, true);
 
     can.into_normal()
@@ -141,6 +142,9 @@ pub fn setup_can(can_pac: FDCAN1, can_clock: CanClock, bitrate: CanBitrate) -> C
 
 pub fn setup_protocol_filters(can: Can_) -> Can_ {
     let mut can = can.into_config_mode();
+
+    // Node: H7 has up to 64 filters available. This is set up for G4's limitations.
+    // This `GetNodeInfo` also matches dynamic ID allocation.
 
     let s = ServiceData {
         dest_node_id: 0, // 7 bits
