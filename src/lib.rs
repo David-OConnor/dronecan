@@ -28,7 +28,7 @@ pub mod protocol;
 pub use broadcast::*;
 pub use dsdl::*;
 #[cfg(feature = "hal")]
-pub use hardware::setup_protocol_filters;
+pub use hardware::{setup_protocol_filters, ALLOC_STAGE, NODE_ID, init_id_alloc_request};
 pub use messages::*;
 pub use protocol::*;
 

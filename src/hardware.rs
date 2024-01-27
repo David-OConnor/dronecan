@@ -13,6 +13,10 @@ use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
 pub type Can_ = FdCan<Can, NormalOperationMode>;
 
 use core::num::{NonZeroU16, NonZeroU8};
+use core::sync::atomic::{AtomicU8, Ordering};
+
+pub static ALLOC_STAGE: AtomicU8 = AtomicU8::new(0);
+pub static NODE_ID: AtomicU8 = AtomicU8::new(0);
 
 #[derive(Clone, Copy)]
 pub enum CanClock {
@@ -188,10 +192,39 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
     //     MsgType::SetConfig.id(),
     // );
 
+    // // todo: H7 feature gate additional filters
+    // #[cfg(feature = "hal_h7")]
+    // set_dronecan_filter(
+    //     &mut can,
+    //     ExtendedFilterSlot::_5,
+    //     FrameType::Service(s),
+    //     MsgType::ConfigRxGet.id(),
+    // );
+
+
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
     let reject_filter = ExtendedFilter::reject_all();
     can.set_extended_filter(ExtendedFilterSlot::_7, reject_filter);
 
     can.into_normal()
+}
+
+/// Start the dynamic ID allocation process.
+pub fn init_id_alloc_request(can: &mut Can_, fd_mode: bool, node_id_preferred: u8, unique_id: &[u8; 16]) {
+    let alloc_stage = ALLOC_STAGE.load(Ordering::Acquire);
+    let node_id = NODE_ID.load(Ordering::Acquire);
+
+    // Initiate the node ID allocation process.
+    if node_id == 0 && alloc_stage == 0 {
+        ALLOC_STAGE.store(1, Ordering::Release);
+
+        let data = crate::IdAllocationData {
+            node_id: node_id_preferred,
+            stage: alloc_stage,
+            unique_id: unique_id.clone(),
+        };
+
+        crate::request_id_allocation_req(can, &data, fd_mode, node_id).ok();
+    }
 }
