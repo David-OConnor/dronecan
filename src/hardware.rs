@@ -172,35 +172,7 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
         FrameType::Service(s),
         MsgType::GetSet.id(),
     );
-    // set_dronecan_id_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Service(s), MsgType::Restart.id());
-    set_dronecan_filter(
-        &mut can,
-        ExtendedFilterSlot::_4,
-        FrameType::Service(s),
-        MsgType::ConfigGnssGet.id(),
-    );
-    set_dronecan_filter(
-        &mut can,
-        ExtendedFilterSlot::_5,
-        FrameType::Service(s),
-        MsgType::ConfigRxGet.id(),
-    );
-    // set_dronecan_filter(
-    //     &mut can,
-    //     ExtendedFilterSlot::_6,
-    //     FrameType::Service(s),
-    //     MsgType::SetConfig.id(),
-    // );
-
-    // // todo: H7 feature gate additional filters
-    // #[cfg(feature = "hal_h7")]
-    // set_dronecan_filter(
-    //     &mut can,
-    //     ExtendedFilterSlot::_5,
-    //     FrameType::Service(s),
-    //     MsgType::ConfigRxGet.id(),
-    // );
-
+    set_dronecan_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Service(s), MsgType::Restart.id());
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
