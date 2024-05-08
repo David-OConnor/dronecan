@@ -2,9 +2,6 @@
 //! or can implement. It's described in the [DSDL repo, protcols page]
 //! (https://github.com/dronecan/DSDL/tree/master/uavcan/protocol)
 
-#[cfg(feature = "hal")]
-use defmt::println;
-
 use crate::{MsgPriority, PAYLOAD_SIZE_CONFIG_COMMON, PAYLOAD_SIZE_NODE_STATUS};
 
 pub struct ParseError {}

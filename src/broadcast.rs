@@ -13,9 +13,9 @@ use fdcan::{
     id::{ExtendedId, Id},
     FdCan, Mailbox, NormalOperationMode, ReceiveOverrun,
 };
+use hal::can::Can;
 use num_enum::TryFromPrimitive;
 use packed_struct::PackedStruct;
-use stm32_hal2::can::Can;
 
 use crate::{
     crc::TransferCrc,
@@ -121,7 +121,7 @@ static mut BUF_POWER_SUPPLY_STATUS: [u8; 8] = [0; 8];
 pub const NODE_ID_MIN_VALUE: u8 = 1;
 pub const NODE_ID_MAX_VALUE: u8 = 127;
 
-use stm32_hal2::pac;
+use hal::pac;
 
 /// Write out packet to the CAN peripheral.
 fn can_send(
@@ -926,8 +926,8 @@ pub fn publish_fix2(
 pub fn publish_ardupilot_gnss_status(
     can: &mut Can_,
     error_codes: u32,
-    healthy: bool,
-    status: u32,
+    _healthy: bool,
+    _status: u32,
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {
@@ -1048,6 +1048,7 @@ pub fn publish_link_stats(
 pub fn publish_telemetry(
     can: &mut Can_,
     data: &[u8],
+    // todo: Don't include len, and just use data len?
     payload_len: usize,
     fd_mode: bool,
     node_id: u8,
@@ -1151,14 +1152,14 @@ pub fn publish_getset_resp(
 
 /// https://github.com/dronecan/DSDL/blob/master/uavcan/protocol/4.GlobalTimeSync.uavcan
 pub fn _handle_time_sync(
-    can: &mut Can_,
+    _can: &mut Can_,
     payload: &[u8],
-    fd_mode: bool,
-    node_id: u8,
+    _fd_mode: bool,
+    _node_id: u8,
 ) -> Result<(), CanError> {
     let mut buf = [0; 8];
     buf[..7].clone_from_slice(payload);
-    let previous_transmission_timestamp_usec = u64::from_le_bytes(buf);
+    let _previous_transmission_timestamp_usec = u64::from_le_bytes(buf);
 
     // todo: Handle.
 
@@ -1225,7 +1226,7 @@ pub fn handle_restart_request(
     Ok(())
 }
 
-fn message_pending_handler(mailbox: Mailbox, header: TxFrameHeader, buf: &[u32]) {
+fn message_pending_handler(_mailbox: Mailbox, _header: TxFrameHeader, _buf: &[u32]) {
     println!("Mailbox overflow!");
 }
 
@@ -1439,7 +1440,7 @@ impl PowerStats {
     }
 
     pub fn from_bytes(buf: &[u8]) -> Self {
-        /// As in `to_bytes`, we assume the data is in u16 x 1000.
+        // As in `to_bytes`, we assume the data is in u16 x 1000.
         Self {
             // todo: Helper to
             voltage_batt: u16_helper(&buf[0..2]),
@@ -1553,7 +1554,7 @@ pub fn publish_power_supply_status(
     hours_to_empty_variance: f32,
     external_power_avail: bool,
     remaining_energy_pct: u8,
-    remaining_energy_ct_std: u8,
+    _remaining_energy_ct_std: u8,
     fd_mode: bool,
     node_id: u8,
 ) -> Result<(), CanError> {

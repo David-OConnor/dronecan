@@ -4,7 +4,7 @@ use core::{
 };
 
 #[cfg(feature = "hal")]
-use stm32_hal2::rng;
+use hal::rng;
 
 use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
 

@@ -6,14 +6,16 @@ use fdcan::{
     interrupt::{Interrupt, InterruptLine},
     ConfigMode, FdCan, NormalOperationMode,
 };
-use stm32_hal2::{can::Can, pac::FDCAN1};
+use hal::{can::Can, pac::FDCAN1};
 
 use crate::{CanBitrate, FrameType, MsgType, RequestResponse, ServiceData};
 
 pub type Can_ = FdCan<Can, NormalOperationMode>;
 
-use core::num::{NonZeroU16, NonZeroU8};
-use core::sync::atomic::{AtomicU8, Ordering};
+use core::{
+    num::{NonZeroU16, NonZeroU8},
+    sync::atomic::{AtomicU8, Ordering},
+};
 
 pub static ALLOC_STAGE: AtomicU8 = AtomicU8::new(0);
 pub static NODE_ID: AtomicU8 = AtomicU8::new(0);
@@ -26,8 +28,6 @@ pub enum CanClock {
     Mhz160,
     Mhz170,
 }
-
-use defmt::println;
 
 pub fn set_dronecan_filter(
     can: &mut FdCan<Can, ConfigMode>,
@@ -172,7 +172,12 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
         FrameType::Service(s),
         MsgType::GetSet.id(),
     );
-    set_dronecan_filter(&mut can, ExtendedFilterSlot::_3, FrameType::Service(s), MsgType::Restart.id());
+    set_dronecan_filter(
+        &mut can,
+        ExtendedFilterSlot::_3,
+        FrameType::Service(s),
+        MsgType::Restart.id(),
+    );
 
     // Place this reject filter in the filal slot, rejecting all messages not explicitly accepted
     // by our dronecan ID filters.
@@ -183,7 +188,12 @@ pub fn setup_protocol_filters(can: Can_) -> Can_ {
 }
 
 /// Start the dynamic ID allocation process.
-pub fn init_id_alloc_request(can: &mut Can_, fd_mode: bool, node_id_preferred: u8, unique_id: &[u8; 16]) {
+pub fn init_id_alloc_request(
+    can: &mut Can_,
+    fd_mode: bool,
+    node_id_preferred: u8,
+    unique_id: &[u8; 16],
+) {
     let alloc_stage = ALLOC_STAGE.load(Ordering::Acquire);
     let node_id = NODE_ID.load(Ordering::Acquire);
 
