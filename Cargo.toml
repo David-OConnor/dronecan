@@ -19,7 +19,7 @@ nb = "^1.1.0"  # For use with Fdcan lib's infallible type.
 defmt = { version = "0.3.4", optional = true }
 
 # For the tightly-packed and many-fielded Fix2.
-packed_struct = {version = "^0.10.1", default_features = false }
+packed_struct = { version = "^0.10.1", default_features = false }
 # We use bitvec for serializing and deserializing standard DroneCan DSDL
 # types that use dynamic-sized arrays; these are unable to be tackled by PackedStruct.
 # This is mainly used for by the `GetSet` DSDL message.
