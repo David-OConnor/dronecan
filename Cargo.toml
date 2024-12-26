@@ -8,7 +8,7 @@ edition = "2021"
 
 [dependencies]
 fdcan = { version = "^0.2.0", optional = true }
-hal = { package = "stm32-hal2", path = "../../stm32-hal", optional = true }
+hal = { package = "stm32-hal2", version = "^1.8.5", optional = true }
 
 # To parse enums from their integer repr
 num_enum = { version = "^0.7.0", default_features = false }
