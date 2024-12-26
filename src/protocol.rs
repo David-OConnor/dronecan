@@ -6,7 +6,7 @@ use core::{
 #[cfg(feature = "hal")]
 use hal::rng;
 
-use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON, USING_CYPHAL};
+use crate::{CanBitrate, CanError, PAYLOAD_SIZE_CONFIG_COMMON};
 
 const MAX_RX_FRAMES_LEGACY: usize = 24;
 const MAX_RX_FRAMES_FD: usize = 3;
@@ -77,11 +77,9 @@ impl ConfigCommon {
     }
 }
 
-/// Accounts for the slight difference in CAN ID layout between DroneCAN and Cyphal.
 #[derive(Clone, Copy)]
 pub enum Protocol {
     DroneCan,
-    Cyphal,
 }
 
 #[derive(Clone, Copy)]
@@ -98,13 +96,6 @@ pub enum TransferComponent {
 /// Valid values for priority range from 0 to 31, inclusively, where 0 corresponds to highest priority
 /// (and 31 corresponds to lowest priority).
 /// In multi-frame transfers, the value of the priority field must be identical for all frames of the transfer.
-///
-/// Cyphal: (Transfer Priority spec section)[https://opencyphal.org/specification/Cyphal_Specification.pdf]:
-/// Valid values for transfer priority range from 0 to 7, inclusively, where 0 corresponds to the highest priority, and
-/// 7 corresponds to the lowest priority (according to the CAN bus arbitration policy).
-/// In multi-frame transfers, the value of the priority field shall be identical for all frames of the transfer.
-///
-/// We use the Cyphal specification, due to its specificity.
 #[derive(Clone, Copy)]
 pub enum MsgPriority {
     Exceptional,
@@ -183,7 +174,6 @@ impl TailByte {
             // For single-frame transfers, the value of this field is always 0.
             // For multi-frame transfers, this field contains the value of the toggle bit. As specified
             // above this will alternate value between frames, starting at 0 for the first frame.
-            // Cyphal note: Behavior of this bit is reversed from DroneCAN. Ie it's 1 for single-frame,
             // and first of multi-frame.
             | ((self.toggle as u8) << 5)
             | (self.transfer_id & 0b1_1111)
@@ -264,7 +254,6 @@ pub struct CanId {
     // Valid values for priority range from 0 to 31, inclusively, where 0 corresponds to highest
     // priority (and 31 corresponds to lowest priority).
     // In multi-frame transfers, the value of the priority field must be identical for all frames of the transfer.
-    // (We use the enum which constrains to Cyphal's values).
     pub priority: MsgPriority,
     /// Valid values of message type ID range from 0 to 65535, inclusively.
     /// Valid values of message type ID range for anonymous message transfers range from 0 to 3, inclusively.
@@ -279,20 +268,8 @@ pub struct CanId {
 
 impl CanId {
     pub fn value(&self) -> u32 {
-        // let on_cyphal = USING_CYPHAL.load(Ordering::Acquire);
-        let on_cyphal = false;
-
         let mut message_type_id = self.type_id;
-        // Cyphal restricts message id to 13 bits.
-        let (priority_bits, priority_shift) = if on_cyphal {
-            message_type_id = message_type_id & 0b1_1111_1111_1111;
-
-            (self.priority.val() as u32 & 0b111, 26)
-        } else {
-            (self.priority.val() as u32 & 0b1_1111, 24)
-        };
-
-        // todo: for cyphal, bit 25 is 1 if a service transfer.
+        let (priority_bits, priority_shift) = (self.priority.val() as u32 & 0b1_1111, 24);
 
         // The `&` operations are to enforce the smaller-bit-count allowed than the datatype allows.
 
@@ -327,11 +304,6 @@ impl CanId {
                     | ((service_data.req_or_resp as u8 as u32) << 15)
                     | (((service_data.dest_node_id & 0b111_1111) as u32) << 8)
             }
-        }
-
-        // On cyphal, Bits 21 and 22 are 1 when transmitting.
-        if on_cyphal {
-            result |= 0b11 << 21;
         }
 
         result
@@ -397,7 +369,6 @@ pub fn get_tail_byte(payload: &[u8], frame_len: u8) -> Result<TailByte, CanError
 /// - Transfer payload
 /// - 0 tail byte, which contains the following fields. Start of transfer (1 bit), End of transfer (1 bit)
 /// toggle bit (1 bit), Transfer id (5 bits)."
-/// Cyphal works in a similar way, but with ar reversed toggle bit.
 pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> TailByte {
     // Defaults for a single-frame transfer using the DroneCAN spec..
     let mut start_of_transfer = true;
@@ -418,10 +389,6 @@ pub fn make_tail_byte(transfer_comonent: TransferComponent, transfer_id: u8) -> 
             toggle = !toggle_prev;
         }
         _ => (),
-    }
-
-    if USING_CYPHAL.load(Ordering::Acquire) {
-        toggle = !toggle;
     }
 
     TailByte {

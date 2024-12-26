@@ -1,8 +1,6 @@
-//! This module contains code that prepares a payload and ID in accordance with the DroneCAN
-//! and Cyphal specifications.
+//! This module contains code that prepares a payload and ID in accordance with the DroneCAN specifications.
 
 //! [Relevant section of DroneCAN specification](https://dronecan.github.io/Specification/4._CAN_bus_transport_layer/)
-//! [Cyphal specification](https://opencyphal.org/specification/Cyphal_Specification.pdf)
 
 //! Todo: Protocol version detection using toggle bit polarity.
 
@@ -38,9 +36,6 @@ pub const PAYLOAD_SIZE_CONFIG_COMMON: usize = 4;
 pub const PAYLOAD_SIZE_NODE_STATUS: usize = 7;
 
 pub const NODE_STATUS_BROADCAST_PERIOD: f32 = 1.; // In s. Between 2 and 1000.
-
-// todo: Protocol enum instead?
-static USING_CYPHAL: AtomicBool = AtomicBool::new(false);
 
 /// Calculate the size in bytes needed to store a certain number of bits.
 pub fn bit_size_to_byte_size(len_bits: usize) -> usize {

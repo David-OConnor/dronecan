@@ -209,7 +209,7 @@ fn can_send(
     }
 }
 
-/// Handles splitting a payload into multiple frames, including DroneCAN and Cyphal requirements,
+/// Handles splitting a payload into multiple frames, including DroneCAN requirements,
 /// eg CRC and data type signature.
 fn send_multiple_frames(
     can: &mut Can_,
